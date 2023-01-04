@@ -11,7 +11,7 @@ using Parameters
     output_folder::String = ""
     omega_m::Float64 = 0.31
     do_recon::Bool = true
-    nbins::Int = 512
+    nbins_recon::Int = 512
     padding::Float64 = 200.
     smooth::Float64 = 10.
     bias::Float64 = 2.
