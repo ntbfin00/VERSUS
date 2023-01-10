@@ -57,6 +57,7 @@ using Parameters
     mock_dens_ratio::Float64 = 10.
     void_min_num::Int = 5
     cluster_min_num::Int = 5
+    max_overlap_frac::Float64 = 0.
 
 end
 
