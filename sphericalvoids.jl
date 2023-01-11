@@ -6,11 +6,20 @@ using ImageFiltering
 using FFTW  # don't need if using ImageFiltering
 
 """
-Return all input parameters.
+Return input parameters specific to spherical voids.
 """
 function get_params(par::Main.VoidParameters.VoidParams)
+    println("\n ==== Spherical void input parameters ==== ")
+
+    spherical_params = ["is_box",
+                       "box_length",
+                       "min_dens_cut",
+                       "max_overlap_frac"]
+                      
     for field in propertynames(par)
-        println(field, " = ", getfield(par, field))
+        if string(field) in spherical_params
+            println(field, " = ", getfield(par, field))
+        end
     end
 end
 
@@ -97,7 +106,6 @@ Returns 0 if new void, else another void has been detected nearby.
 """
 function nearby_voids1(voids_total::Int8,dims::Int64,middle::Int64,i::Int64,j::Int64,k::Int64,void_radius::Array{Float64,1},void_pos::Array{Int64,2},R_grid::Float64,max_overlap_frac::Float64)
 
-
     nearby_voids = Threads.Atomic{Int8}(0)
     overlap_frac::Float64 = 0
 
@@ -149,7 +157,7 @@ function nearby_voids1(voids_total::Int8,dims::Int64,middle::Int64,i::Int64,j::I
         end
     end
 
-    nearby_voids
+    nearby_voids[]
 
 end
 
@@ -159,11 +167,11 @@ Identify if void candidate is a new void or belongs to a previously detected voi
 
 Returns 0 if new void, else another void has been detected nearby.
 """
-function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64)
+function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64)
 
     nearby_voids = Threads.Atomic{Int8}(0)
     overlap::Int64 = 0
-    inv_void_cells = 3/(4*pi*(R_grid)^3)
+    inv_void_cells = 3/(4*pi*R_grid^3)
 
     # loop over all cells in cubic box around void
     Threads.@threads for l = -Ncells:Ncells  # test performance against not using threads and using threads for each nested loop
@@ -201,14 +209,13 @@ function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_gri
                     k1 += dims
                 end
 
-                ID = dims*((i1-1)*dims + (j1-1)) + (k1-1)
                 # skip if cell does not belong to another void
-                if in_void[ID] == 0
+                if in_void[i1,j1,k1] == 0
                     continue
                 # determine if void cell is within radius of candidate 
                 else
                     dist2 = l*l + m*m + n*n
-                    if dist2<(R_grid*R_grid)
+                    if dist2<R_grid2
 
                         if max_overlap_frac == 0
                             Threads.atomic_add!(nearby_voids,Int8(1))
@@ -226,16 +233,18 @@ function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_gri
         end
     end
 
-    nearby_voids
+    nearby_voids[]
 
 end
 
 
 function mark_void_region!(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3})
 
+    counter = 0
 
     # loop over all cells in cubic box around void
-    Threads.@threads for l = -Ncells:Ncells  
+    # Threads.@threads 
+    for l = -Ncells:Ncells  
 
         i1 = i+l
         if i1>dims
@@ -245,7 +254,8 @@ function mark_void_region!(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R
             i1 += dims
         end
 
-        Threads.@threads for m = -Ncells:Ncells  
+        # Threads.@threads 
+        for m = -Ncells:Ncells  
 
             j1 = j+m
             if j1>dims
@@ -255,7 +265,8 @@ function mark_void_region!(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R
                 j1 += dims
             end
 
-            Threads.@threads for n = -Ncells:Ncells        
+            # Threads.@threads 
+            for n = -Ncells:Ncells        
 
                 k1 = k+n
                 if k1>dims
@@ -267,24 +278,27 @@ function mark_void_region!(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R
 
                 dist2 = l*l + m*m + n*n
                 if dist2<R_grid2
-                    ID = dims*((i1-1)*dims + (j1-1)) + (k1-1)
-                    in_void[ID] = 1
+
+                    in_void[i1,j1,k1] = Int8(1)
+
                 end
             end
         end
     end
 end
 
+"""
+Determine the number of voids in given overdensity mesh with radii specified at input.
 
+    1) Smooth density field with spherical top-hat filter of radius R (starting with largest R)
+    2) Find cells with density lower than threshold (starting with lowest density)
+    3) Cell determined to be centre of void with radius R if does not overlap with previously determined void, otherwise discarded
+    4) This is performed for all cells lower than threshold 
+    5) Then repeated with next largest smoothing radius
+
+"""
 function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Main.VoidParameters.VoidParams)
-    println(" ==== Starting the void-finding with spherical-based method ==== ")
-
-    # 1) Smooth density field with spherical top-hat filter of radius R (starting with largest R)
-    # 2) Find cells with density lower than threshold (starting with lowest density)
-    # 3) Cell determined to be centre of void with radius R if does not overlap with previously determined void, otherwise discarded
-    # 4) This is performed for all cells lower than threshold 
-    # 5) Then repeated with next largest smoothing radius
-
+    println("\n ==== Starting the void-finding with spherical-based method ==== ")
 
     dims = size(delta,1)
     dims2 = dims^2
@@ -302,8 +316,9 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
     Radii = sort(Radii, rev=true)
     # check Rmin is larger than grid resolution
     Rmin = Radii[end]
+
     if Rmin<res
-        ErrorException("Rmin below grid resolution")  # want to add float to msg
+        throw(ErrorException("Rmin=$Rmin Mpc/h below grid resolution=$res Mpc/h"))
     end
     # determine the maximum possible number of voids
     vol_eff = (1.0-par.max_overlap_frac)*(4*pi*Rmin^3)/3  # minimum effective void volume
@@ -336,7 +351,6 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
         if par.verbose
             @printf("\nSmoothing galaxy density field with top-hat filter of radius %.2f...\n", R)
         end
-        ## sys.stout.flush()
         delta_sm = smoothing(delta, R, res,"top-hat")
         ## IS SMOOTHING SIGMA CORRECT??
         if minimum(delta_sm)>threshold
@@ -368,7 +382,7 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
 
         R_grid = R/res
         R_grid2 = R_grid*R_grid
-        Ncells = floor(Int8,R_grid) + 1
+        Ncells = floor(Int8,R_grid + 1)
 
         if voids_total<(2*Ncells+1)^3
             mode = 0
@@ -382,7 +396,6 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
         for ID in IDs[1:local_voids]
             i,j,k = (ID÷dims2, (ID%dims2)÷dims, (ID%dims2)%dims) .+ 1
 
-
             # if cell belong to a void, continue
             if in_void[i,j,k] == 1
                 continue
@@ -391,7 +404,7 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
             if mode==0
                 nearby_voids = nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
             else
-                nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, in_void, par.max_overlap_frac)
+                nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac)
             end
 
 
@@ -400,7 +413,7 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
                 voids_with_R += 1
                 voids_total += 1
 
-                void_pos[voids_total,:] = i,j,k
+                void_pos[voids_total,:] .= i,j,k
                 void_radius[voids_total] = R_grid
 
                 # flag cells belonging to new void
