@@ -167,7 +167,7 @@ Identify if void candidate is a new void or belongs to a previously detected voi
 
 Returns 0 if new void, else another void has been detected nearby.
 """
-function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64)
+function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64)
 
     nearby_voids = Threads.Atomic{Int8}(0)
     overlap::Int64 = 0
@@ -238,9 +238,7 @@ function nearby_voids2(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_gri
 end
 
 
-function mark_void_region!(Ncells::Int8,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3})
-
-    counter = 0
+function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3})
 
     # loop over all cells in cubic box around void
     # Threads.@threads 
@@ -382,7 +380,7 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
 
         R_grid = R/res
         R_grid2 = R_grid*R_grid
-        Ncells = floor(Int8,R_grid + 1)
+        Ncells = floor(Int64,R_grid + 1)
 
         if voids_total<(2*Ncells+1)^3
             mode = 0
@@ -430,8 +428,10 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
         if par.verbose 
             @printf("Found %d voids with radius R >= %.3f Mpc/h\n",voids_total,R)
             @printf("Void volume filling fraction = %.3f\n",sum(in_void)/dims3)
-            expected_filling_frac += voids_with_R*4*pi*R^3/(3*par.box_length^3)
-            @printf("Expected filling fraction = %.3f\n",expected_filling_frac)
+            if par.max_overlap_frac == 0
+                expected_filling_frac += voids_with_R*4*pi*R^3/(3*par.box_length^3)
+                @printf("Expected filling fraction = %.3f\n",expected_filling_frac)
+            end
         end
             
     end
