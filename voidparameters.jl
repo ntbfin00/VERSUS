@@ -11,7 +11,7 @@ using Parameters
     output_folder::String = ""
     omega_m::Float64 = 0.31
     do_recon::Bool = true
-    nbins_recon::Int = 512
+    nbins::Int = 512
     padding::Float64 = 200.
     smooth::Float64 = 10.
     bias::Float64 = 2.
@@ -58,6 +58,7 @@ using Parameters
     void_min_num::Int = 5
     cluster_min_num::Int = 5
     max_overlap_frac::Float64 = 0.
+    use_parallel::Bool = false
 
 end
 
