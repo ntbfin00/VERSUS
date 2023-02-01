@@ -1,6 +1,8 @@
+"""
+Adapted from https://github.com/franciscovillaescusa/Pylians3
+"""
 module SphericalVoids  # create module to be loaded in main file
 
-# package import
 using Printf
 using FFTW
 
@@ -22,7 +24,7 @@ function get_params(par::Main.VoidParameters.VoidParams)
                        "box_length",
                        "min_dens_cut",
                        "max_overlap_frac",
-                       "use_parallel"]
+                       "threading"]
                       
     for field in propertynames(par)
         if string(field) in spherical_params
@@ -30,7 +32,7 @@ function get_params(par::Main.VoidParameters.VoidParams)
         end
     end
 
-    if par.use_parallel
+    if par.threading
         if Threads.nthreads() == 1
             throw(ErrorException("Parallel computing is set to True but only 1 thread in use."))
         end
@@ -41,12 +43,12 @@ end
 """
 Top-hat smoothing of density field.
 """
-function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64)
 
     # compute FFT of the field
-    delta_k = fft(delta)
+    delta_k = rfft(delta, [3,1,2])
 
-    # loop over independent modes
+    # # loop over independent modes
     prefact = 2.0*pi*R/box_length
     for kxx = 0:dims-1
         if kxx>middle
@@ -64,17 +66,13 @@ function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,
             end
             ky2 = ky*ky
     
-            for kzz = 0:dims-1
-                if kzz>middle
-                    kz = kzz-dims
-                else
-                    kz = kzz
-                end
-                kz2 = kz*kz
+            for kzz = 0:middle
+                kz2 = kzz*kzz
 
                 if kxx==0 && kyy==0 && kzz==0
                     continue 
                 end
+
 
                 kR = prefact * sqrt(kx2 + ky2 + kz2)
                 if abs(kR)<1e-5
@@ -89,22 +87,28 @@ function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,
         end
     end
 
-    real.(ifft(delta_k))
+    # k = fftfreq(dims, dims)
+    # k2 = [kx*kx + ky*ky + kz*kz for kx in k,ky in k,kz in 0:middle]
+    # kR = 2.0*pi*R/box_length * sqrt.(k2)
+    # delta_k .*= 3.0*(sin.(kR) - cos.(kR).*kR)./(kR.^3)
+    # delta_k[1,1,1] = 0
+
+    real.(irfft(delta_k, dims, [3,1,2]))
 
 end
 
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,use_parallel::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,threading::Bool)
 
     # check parallelisation is to be used
-    if !use_parallel
+    if !threading
         throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
     end
 
-    # compute FFT of the field
-    P = plan_fft(delta; num_threads=Threads.nthreads())
+    # # compute FFT of the field
+    P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
     delta_k = P * delta
 
     # loop over independent modes
@@ -125,13 +129,8 @@ function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,
             end
             ky2 = ky*ky
     
-            for kzz = 0:dims-1
-                if kzz>middle
-                    kz = kzz-dims
-                else
-                    kz = kzz
-                end
-                kz2 = kz*kz
+            for kzz = 0:middle
+                kz2 = kzz*kzz
 
                 if kxx==0 && kyy==0 && kzz==0
                     continue 
@@ -150,8 +149,19 @@ function smoothing(delta::Array{Float64,3},dims::Int64,middle::Int64,R::Float64,
         end
     end
 
-    P = plan_ifft(delta_k; num_threads=Threads.nthreads())
+    P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
     real.(P * delta_k)
+
+    # P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
+    # delta_k = P * delta
+    # k = fftfreq(dims, dims)
+    # k2 = [kx*kx + ky*ky + kz*kz for kx in k,ky in k,kz in 0:middle]
+    # kR = 2.0*pi*R/box_length * sqrt.(k2)
+    # delta_k .*= 3.0*(sin.(kR) - cos.(kR).*kR)./(kR.^3)
+    # delta_k[1,1,1] = 0
+
+    # P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
+    # real.(P * delta_k)
 
 end
 
@@ -183,8 +193,8 @@ function nearby_voids1(voids_total::Int32,dims::Int64,middle::Int64,i::Int64,j::
 
     # loop over all previously detected voids
     for l = 1:voids_total
-        if nearby_voids[]>0 
-            continue
+        if nearby_voids>0 
+            break
         end
 
         dx = i - void_pos[l,1]
@@ -229,10 +239,9 @@ function nearby_voids1(voids_total::Int32,dims::Int64,middle::Int64,i::Int64,j::
         end
     end
 
-    nearby_voids[]
+    nearby_voids
 
 end
-
 
 """
 Identify if void candidate is a new void or belongs to a previously detected void by determining if cells around the candidate belong to other voids.
@@ -309,10 +318,10 @@ function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_gr
 
 end
 
-function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64,use_parallel::Bool)
+function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64,threading::Bool)
 
     # check parallelisation is to be used
-    if !use_parallel
+    if !threading
         throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
     end
 
@@ -431,10 +440,10 @@ function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,
     end
 end
 
-function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3},use_parallel::Bool)
+function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3},threading::Bool)
 
     # check parallelisation is to be used
-    if !use_parallel
+    if !threading
         throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
     end
 
@@ -491,7 +500,7 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Main.VoidParameters.VoidParams)
+function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},par::Main.VoidParameters.VoidParams)
     println("\n ==== Starting the void-finding with spherical-based method ==== ")
 
     dims = size(delta,1)
@@ -517,7 +526,9 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
     # determine the maximum possible number of voids
     vol_eff = (1.0-par.max_overlap_frac)*(4*pi*Rmin^3)/3  # minimum effective void volume
     voids_max = floor(Int64, par.box_length/vol_eff)
-    @printf("\nMaximum number of voids = %d\n", voids_max)
+    if par.verbose && par.max_overlap_frac == 0
+        @printf("\nMaximum number of voids = %d\n", voids_max)
+    end
 
     # initialize arrays
     void_pos = zeros(Int64,voids_max,3)  # void positions
@@ -544,10 +555,10 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
             @printf("\nSmoothing galaxy density field with top-hat filter of radius %.2f...\n", R)
         end
 
-        if !par.use_parallel
+        if !par.threading
             delta_sm = smoothing(delta, dims, middle, R, par.box_length)
         else
-            delta_sm = smoothing(delta, dims, middle, R, par.box_length, par.use_parallel)
+            delta_sm = smoothing(delta, dims, middle, R, par.box_length, par.threading)
         end
 
         if minimum(delta_sm)>threshold
@@ -599,12 +610,12 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
             end
 
             if mode==0 
-                    nearby_voids = nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
+                nearby_voids = nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
             else
-                if !par.use_parallel
+                if !par.threading
                     nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac)
                 else
-                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, par.use_parallel)
+                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, par.threading)
                 end
             end
 
@@ -618,10 +629,10 @@ function run_voidfinder(delta::Array{Float64,3},Radii::Array{Float64,1},par::Mai
 
                 # flag cells belonging to new void
                 in_void[i,j,k] = 1
-                if !par.use_parallel
+                if !par.threading
                     mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void)
                 else
-                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, par.use_parallel)
+                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, par.threading)
                 end
 
             end

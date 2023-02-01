@@ -6,40 +6,83 @@ using .VoidParameters
 using .MeshBuilder
 using .SphericalVoids  # load module to use struct
 
-using NPZ
+using ArgParse
+using FITSIO
+using HDF5
+using YAML
+using NPZ  #REMOVE
 
-#=============== Input parameters (not default) ===============#
+"""
+Read input data and randoms files in FITS or hdf5 format.
+"""
+function read_input(fn)
+    hdf5_ext = [".hdf", ".h4", ".hdf4", ".he2", ".h5", ".hdf5", ".he5", ".h5py"]                                                          
+    if endswith(fn, ".fits")
+        f = FITS(fn)
+        pos = read(f,["x","y","z"])
+        wts = read(f,"weights")
+    elseif any(endswith.(fn, hdf5_ext))
+        f = h5open(fn, "r")
+        pos = read(f)
+        close(f)
+    else
+        throw(ErrorException("Input file format not recognised. Allowed formats are .fits, $hdf5_ext"))
+    end
 
-new_params = (is_box=true,
-              output_folder = "revolver_test/",
-              verbose = true,
-              box_length = 1.0,
-              nbins = 100,
-              tracer_file = "rand_dist.npy",
-              tracer_file_type = 2,
-              do_recon = false,
-              use_parallel=true)
-              # max_overlap_frac=0.3)
+    return pos, wts
+end
 
-# =========================================== #
+s = ArgParseSettings()
+@add_arg_table! s begin
+    "--data"
+        help = "galaxy positions and weights"
+        required = true
+        arg_type = String
+    "--randoms"
+        help = "random positions and weights"
+        arg_type = String
+    "--config"
+        help = "optional configuration YAML file"
+        arg_type = String
+end
+
+args = parse_args(ARGS, s)
+
+# read input data
+# gal_pos, gal_wts = read_input(args["data"])
+# if args["randoms"] == nothing
+    # cat = GalaxyCatalogue(gal_pos, gal_wts)
+# else
+    # rand_pos, rand_wts = read_input(args["randoms"])
+    # cat = GalaxyCatalogue(gal_pos, gal_wts, rand_pos, rand_wts)
+# end
 
 # initialise parameter struct 
-par = VoidParams(;new_params...)
+if args["config"] == nothing
+    par = VoidParams()
+elseif endswith(args["config"], ".yaml")
+    config = YAML.load_file(args["config"])
+    new_params = Dict()
+    [new_params[Symbol(key)] = value for (key,value) in config]
+    par = VoidParams(;new_params...)
+else
+    throw(ErrorException("Config file format not recognised. Allowed format is .yaml"))
+end
 
 # create density mesh
-pos = npzread("data/rand_dist.npy")
-weights = ones(size(pos))
-cat = GalaxyCatalogue(pos, weights)
-delta = create_mesh(par, cat, 0.015)  # is nbins in params correct?
+# delta = create_mesh(par, cat, 0.0)  #is nbins in params correct?
 
-# delta = npzread("data/delta.npy")
+# npzwrite("data/delta_pyrecon_"*string(par.nbins)*".npy",delta)
+delta = npzread("data/delta_pyrecon_500.npy")
+delta = convert(Array{Float32,3},delta) 
 
 # list input parameters
 SphericalVoids.get_params(par)
 
 # run voidfinder 
-Radii = [0.1,0.2,0.3]  # input radii could be moved to parameters??
-spherical_voids = SphericalVoids.run_voidfinder(delta, Radii, par)
+Radii = [0.1]#,0.2,0.3]  # input radii could be moved to parameters??
+using BenchmarkTools
+@btime spherical_voids = SphericalVoids.run_voidfinder(delta, Radii, par)
 
 # voidfinder output
 # println("\n ==== Output ==== ")
@@ -47,41 +90,5 @@ spherical_voids = SphericalVoids.run_voidfinder(delta, Radii, par)
 # println("void positions = ", spherical_voids.positions)
 # println("void radii = ", spherical_voids.radii)
 # println("void size function = ", spherical_voids.vsf," at R = ", spherical_voids.rbins)
-
-
-# ==================================== #
-# ============ TESTING =============== #
-using BenchmarkTools
-
-dims = size(delta,1)
-middle = dims÷2
-res = par.box_length/dims
-R = Radii[3]
-# R_grid = R/res
-# R_grid2 = R_grid*R_grid
-# Ncells = floor(Int64,R_grid + 1)
-# in_void = npzread("data/in_void.npy")
-# void_pos = round.(Int64,spherical_voids.positions/res)
-# void_radius = spherical_voids.radii
-# voids_total::Int32 = size(void_radius,1)
-# i,j,k = (23,31,96)
-# println("in_void=",in_void[i,j,k])
-
-# @btime SphericalVoids.nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
-# @btime SphericalVoids.nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac)
-# @btime SphericalVoids.nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac,par.use_parallel)
-# @btime SphericalVoids.mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void)
-# @btime SphericalVoids.mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void,par.use_parallel)
-
-# @btime SphericalVoids.smoothing(delta, dims, middle, R, par.box_length)
-
-# R = 0.2
-# delta_sm = SphericalVoids.smoothing(delta,R,0.05,"top-hat")
-# npzwrite("data/delta_sm.npy",delta_sm)
-
-# a = SphericalVoids.void_overlap_frac(5.0,5.0,110.0)
-# b = SphericalVoids.void_overlap_frac(5.0,5.0,100.0)
-# c = SphericalVoids.void_overlap_frac(2.0,2.0,sqrt(0.69)*2)
-# println("expect 0 -> ",a,"expect 0 -> ",b,"expect 0.5 -> ",c)
 
 
