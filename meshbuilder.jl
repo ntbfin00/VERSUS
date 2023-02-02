@@ -8,67 +8,71 @@ np = pyimport("numpy")
 recon = pyimport("pyrecon.recon")
 
 """
-GalaxyCatalogue.positions - galaxy positions (x,y,z)
-GalaxyCatalogue.weights - galaxy weights
-GalaxyCatalogue.randoms - random positions (x,y,z)
+GalaxyCatalogue.gal_pos - galaxy positions (x,y,z)
+GalaxyCatalogue.gal_wts - galaxy weights
+GalaxyCatalogue.rand_pos - random positions (x,y,z)
+GalaxyCatalogue.rand_wts - random weights
 
 Randoms set to size 0 matrix when not specified.
 """
 struct GalaxyCatalogue
-    positions::Array{AbstractFloat,2}
-    weights::Array{AbstractFloat,2}
-    randoms::Array{AbstractFloat,2}
-    function GalaxyCatalogue(positions,weights,randoms=Array{AbstractFloat}(undef,0,0))
-        new(positions,weights,randoms)
+    gal_pos::Array{AbstractFloat,2}
+    gal_wts::Array{AbstractFloat,2}
+    rand_pos::Array{AbstractFloat,2}
+    rand_wts::Array{AbstractFloat,2}
+    function GalaxyCatalogue(gal_pos,gal_wts,rand_pos=Array{AbstractFloat}(undef,0,0),rand_wts=Array{AbstractFloat}(undef,0,0))
+        new(gal_pos,gal_wts,rand_pos,rand_wts)
     end
 end
 
-function create_mesh(par::Main.VoidParameters.VoidParams,cat::GalaxyCatalogue,r_sm::Float64; boxcenter=par.box_length/2)
+function create_mesh(cat::GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams; boxcenter=par.box_length/2)
     println("\n ==== Creating density mesh ==== ")
 
-    if !par.is_box && size(cat.randoms,1) != 0
+    if !mesh.is_box && size(cat.rand_pos,1) != 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    positions = np.array(cat.positions)
-    weights = np.array(cat.weights)
+    gal_pos = np.array(cat.gal_pos)
+    gal_wts = np.array(cat.gal_wts)
 
     # check if randoms have same weight as data
-    rec = recon.BaseReconstruction(nmesh=par.nbins, boxsize=par.box_length, boxcenter=boxcenter,nthreads=Threads.nthreads()) # box center alright??
+    rec = recon.BaseReconstruction(nmesh=mesh.nbins, boxsize=input.box_length, boxcenter=boxcenter,dtype=mesh.dtype, nthreads=Threads.nthreads()) # box center alright??
 
     println("Assigning galaxies to grid...")
-    rec.assign_data(positions, weights)
+    rec.assign_data(gal_pos, gal_wts)
 
-    if par.is_box
-        rec.set_density_contrast(smoothing_radius=r_sm)
+    if mesh.is_box
+        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
 
-        if par.do_recon
+        if mesh.do_recon
             println("Running reconstruction...")
             rec.run()
-            rec_positions = rec.read_shifted_positions(positions)
-            rec.assign_data(rec_positions, weights)
-            rec.set_density_contrast(smoothing_radius=r_sm)
+            rec_gal_pos = rec.read_shifted_positions(gal_pos)
+            rec.assign_data(rec_gal_pos, gal_wts)
+            rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
         end
 
     else
-        randoms = np.array(cat.randoms)
+        rand_pos = np.array(cat.rand_pos)
+        rand_wts = np.array(cat.rand_wts)
         println("Assigning randoms to grid...")
-        rec.assign_randoms(randoms, weights)
-        rec.set_density_contrast(smoothing_radius=r_sm)
+        rec.assign_randoms(rand_pos, rand_wts)
+        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
 
-        if par.do_recon
+        if mesh.do_recon
             println("Running reconstruction...")
             rec.run()
-            rec_positions = rec.read_shifted_positions(positions)
-            rec.assign_data(rec_positions, weights)
-            rec_randoms = rec.read_shifted_positions(randoms) # do i need this step?
-            rec.assign_randoms(rec_randoms, cat.weights)
-            rec.set_density_contrast(smoothing_radius=r_sm)
+            rec_gal_pos = rec.read_shifted_positions(gal_pos)
+            rec.assign_data(rec_gal_pos, gal_wts)
+            rec_rand_pos = rec.read_shifted_positions(rand_pos) # do i need this step?
+            rec.assign_randoms(rec_rand_pos, rand_wts)
+            rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
         end
     end
 
-    println("Density mesh set.")
-    rec.mesh_delta.value
+    delta = rec.mesh_delta.value
+    println(string(typeof(delta))[7:13]," density mesh set.")
+    delta
 
 end
 

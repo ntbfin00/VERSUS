@@ -1,0 +1,28 @@
+input:
+  threading: 
+  box_length: 
+  verbose: 
+  build_mesh: 
+  run_voidfinder:
+
+output:
+  output_type:
+  output_folder:
+
+mesh:
+  is_box:
+  dtype:
+  nbins: 
+  do_recon: 
+  padding:
+  r_smooth:
+  omega_m:
+  f:
+  bias:
+
+spherical_voids:
+  output_fn:
+  radii: 
+  min_dens_cut:
+  max_overlap_frac:
+

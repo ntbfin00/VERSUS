@@ -10,34 +10,20 @@ struct VoidData
     type::String
     positions::Array{Float64,2}
     radii::Array{Float64,1}
-    vsf::Array{Float64,1}
-    rbins::Array{Float64,1}
+    vsf::Array{Float64,2}
+    # rbins::Array{Float64,1}
 end
 
 """
 Return input parameters specific to spherical voids.
 """
-function get_params(par::Main.VoidParameters.VoidParams)
+function get_params(par::Main.VoidParameters.SphericalVoidParams)
     println("\n ==== Spherical void input parameters ==== ")
 
-    spherical_params = ["is_box",
-                       "box_length",
-                       "min_dens_cut",
-                       "max_overlap_frac",
-                       "threading"]
-                      
     for field in propertynames(par)
-        if string(field) in spherical_params
-            println(field, " = ", getfield(par, field))
-        end
+        println(field, " = ", getfield(par, field))
     end
 
-    if par.threading
-        if Threads.nthreads() == 1
-            throw(ErrorException("Parallel computing is set to True but only 1 thread in use."))
-        end
-        println("\nComputing in parallel with n=",Threads.nthreads()," threads.")
-    end
 end
 
 """
@@ -104,7 +90,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
 
     # check parallelisation is to be used
     if !threading
-        throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
+        throw(ErrorException("Threading is set to False, cannot use this function!"))
     end
 
     # # compute FFT of the field
@@ -322,7 +308,7 @@ function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_gr
 
     # check parallelisation is to be used
     if !threading
-        throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
+        throw(ErrorException("Threading is set to False, cannot use this function!"))
     end
 
     nearby_voids = Threads.Atomic{Int32}(0)
@@ -444,7 +430,7 @@ function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,
 
     # check parallelisation is to be used
     if !threading
-        throw(ErrorException("Parallel computing is set to False, cannot use this function!"))
+        throw(ErrorException("Threading is set to False, cannot use this function!"))
     end
 
     # loop over all cells in cubic box around void
@@ -500,23 +486,32 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},par::Main.VoidParameters.VoidParams)
-    println("\n ==== Starting the void-finding with spherical-based method ==== ")
+function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams) 
+    println("\n ==== Void-finding with spherical-based method ==== ")
+    if input.threading
+        if Threads.nthreads() == 1
+            throw(ErrorException("Threading set to True but only 1 thread in use."))
+        end
+        println("\nMultithreading active: n=",Threads.nthreads()," threads in use.")
+    else
+        if Threads.nthreads() > 1
+            throw(ErrorException("Threading set to False but attempting to use >1 threads."))
+        end
+    end
 
     dims = size(delta,1)
     dims2 = dims^2
     dims3 = dims^3
     middle = dims÷2
-    r_bins = size(Radii,1)
+    r_bins = size(par.radii,1)
 
-    res::Float64 = par.box_length/dims
+    res::Float64 = input.box_length/dims
 
     # set minimum overdensity threshold
-    # IS THIS CORRECT??
     threshold = par.min_dens_cut - 1
 
     # sort radii from largest to smallest
-    Radii = sort(Radii, rev=true)
+    Radii = sort(par.radii, rev=true)
     # check Rmin is larger than grid resolution
     Rmin = Radii[end]
 
@@ -525,8 +520,8 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
     end
     # determine the maximum possible number of voids
     vol_eff = (1.0-par.max_overlap_frac)*(4*pi*Rmin^3)/3  # minimum effective void volume
-    voids_max = floor(Int64, par.box_length/vol_eff)
-    if par.verbose && par.max_overlap_frac == 0
+    voids_max = floor(Int64, input.box_length/vol_eff)
+    if input.verbose && par.max_overlap_frac == 0
         @printf("\nMaximum number of voids = %d\n", voids_max)
     end
 
@@ -539,26 +534,21 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
     IDs = Array{Int64}(undef,dims3)  # underdense cell IDs
 
     Nvoids = zeros(Int64,r_bins)
-    vsf = zeros(Float64,r_bins-1)
-    r_bin_centres = zeros(Float64,r_bins-1)
-
-    # create output folder
-    if !isdir(par.output_folder)
-        mkdir(par.output_folder)
-    end
+    vsf = zeros(Float64,r_bins-1,2)
+    # r_bin_centres = zeros(Float64,r_bins-1)
 
     # find voids at each input radius R
     voids_total::Int32 = 0  # total number of voids found
     expected_filling_frac::Float64 = 0.0
     for (q,R) in enumerate(Radii)  
-        if par.verbose
+        if input.verbose
             @printf("\nSmoothing galaxy density field with top-hat filter of radius %.2f...\n", R)
         end
 
-        if !par.threading
-            delta_sm = smoothing(delta, dims, middle, R, par.box_length)
+        if !input.threading
+            delta_sm = smoothing(delta, dims, middle, R, input.box_length)
         else
-            delta_sm = smoothing(delta, dims, middle, R, par.box_length, par.threading)
+            delta_sm = smoothing(delta, dims, middle, R, input.box_length, input.threading)
         end
 
         if minimum(delta_sm)>threshold
@@ -612,10 +602,10 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
             if mode==0 
                 nearby_voids = nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
             else
-                if !par.threading
+                if !input.threading
                     nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac)
                 else
-                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, par.threading)
+                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, input.threading)
                 end
             end
 
@@ -629,10 +619,10 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
 
                 # flag cells belonging to new void
                 in_void[i,j,k] = 1
-                if !par.threading
+                if !input.threading
                     mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void)
                 else
-                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, par.threading)
+                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, input.threading)
                 end
 
             end
@@ -642,11 +632,11 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
         Nvoids[q] = voids_with_R
 
         @printf("Found %d voids with radius R = %.3f Mpc/h\n",voids_with_R,R)
-        if par.verbose 
+        if input.verbose 
             @printf("Found %d voids with radius R >= %.3f Mpc/h\n",voids_total,R)
             @printf("Void volume filling fraction = %.3f\n",sum(in_void)/dims3)
             if par.max_overlap_frac == 0
-                expected_filling_frac += voids_with_R*4*pi*R^3/(3*par.box_length^3)
+                expected_filling_frac += voids_with_R*4*pi*R^3/(3*input.box_length^3)
                 @printf("Expected filling fraction = %.3f\n",expected_filling_frac)
             end
         end
@@ -658,16 +648,17 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3},Radii::Array{Float64,1},
 
     # compute the void size function (# of voids/Volume/dR)
     for i = 1:r_bins-1
-        vsf[i] = Nvoids[i]/(par.box_length^3*(Radii[i]-Radii[i+1]))
-        r_bin_centres[i] = 0.5*(Radii[i]+Radii[i+1])
+        vsf[i,1] = Nvoids[i]/(input.box_length^3*(Radii[i]-Radii[i+1]))
+        # r_bin_centres[i] = 0.5*(Radii[i]+Radii[i+1])
+        vsf[i,2] = 0.5*(Radii[i]+Radii[i+1])
     end
 
     # ouput data as a struct instance
     VoidData("Spherical",
              void_pos[1:voids_total,:]*res,
              void_radius[1:voids_total]*res,
-             vsf,
-             r_bin_centres)
+             vsf)
+             # r_bin_centres)
 
 end
 
