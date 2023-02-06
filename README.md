@@ -52,3 +52,4 @@ Run mesh building and void finding direct from command line:
 ```
 julia [-t <n_threads>] main.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
 ```
+To supply a pre-computed mesh (instead of galaxy positions), set ```input["build_mesh"] = false```.
