@@ -534,7 +534,7 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     IDs = Array{Int64}(undef,dims3)  # underdense cell IDs
 
     Nvoids = zeros(Int64,r_bins)
-    vsf = zeros(Float64,r_bins-1,2)
+    vsf = zeros(Float64,r_bins,2)
     # r_bin_centres = zeros(Float64,r_bins-1)
 
     # find voids at each input radius R
@@ -647,15 +647,16 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     @printf("Void volume filling fraction = %.3f\n",sum(in_void)/dims3)
 
     # compute the void size function (# of voids/Volume/dR)
-    for i = 1:r_bins-1
-        vsf[i,1] = Nvoids[i]/(input.box_length^3*(Radii[i]-Radii[i+1]))
-        # r_bin_centres[i] = 0.5*(Radii[i]+Radii[i+1])
-        vsf[i,2] = 0.5*(Radii[i]+Radii[i+1])
+    for i = 1:r_bins
+        r = vcat(Radii, 0)
+        vsf[i,1] = 0.5*(r[i]+r[i+1])
+        vsf[i,2] = Nvoids[i]/(input.box_length^3*(r[i]-r[i+1]))
     end
 
+    box_shift = input.box_centre .- input.box_length/2
     # ouput data as a struct instance
     VoidData("Spherical",
-             void_pos[1:voids_total,:]*res,
+             void_pos[1:voids_total,:]*res .+ box_shift',
              void_radius[1:voids_total]*res,
              vsf)
              # r_bin_centres)

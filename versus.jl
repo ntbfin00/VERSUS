@@ -9,26 +9,61 @@ using ArgParse
 using FITSIO
 using HDF5
 using YAML
-using NPZ  #REMOVE
+using DelimitedFiles
 
 """
 Read input data and randoms files in FITS or hdf5 format.
 """
-function read_input(fn::String)
+function read_input(input::VoidParameters.InputParams, fn::String)
     hdf5_ext = [".hdf", ".h4", ".hdf4", ".he2", ".h5", ".hdf5", ".he5", ".h5py"]                                                          
-    if endswith(fn, ".fits")
-        f = FITS(fn)
-        # pos = read(f[2],"pos")  ## FIX
-        # wts = read(f[2],"weights")  ## FIX
-    elseif any(endswith.(fn, hdf5_ext))
-        f = h5open(fn, "r")
-        # pos = read(f)  ## FIX
-        close(f)
+    wts_supplied = 0
+
+    # if galaxies/randoms are supplied as input
+    if input_settings.build_mesh
+        if endswith(fn, ".fits")
+            f = FITS(fn, "r")
+            N = read_header(f[2])["NAXIS2"]
+            pos = Array{AbstractFloat}(undef,N,3)
+            for (i,cols) in enumerate(input.data_cols)
+                if i<4
+                    pos[:,i] = read(f[2], cols)
+                else
+                    wts_supplied = 1
+                    wts = read(f[2], cols)
+                end
+            end
+            close(f)
+        elseif any(endswith.(fn, hdf5_ext))
+            f = h5open(fn, "r")
+            # pos = read(f)  ## FIX
+            close(f)
+        else
+            throw(ErrorException("Input file format not recognised. Allowed formats are " * append!([".fits"],hdf5_ext)))
+        end
+
+        if wts_supplied == 0 
+            return pos, Array{AbstractFloat}(undef,0)
+        else
+            return pos, wts
+        end
+
+    # if density mesh is supplied as input
     else
-        throw(ErrorException("Input file format not recognised. Allowed formats are " * append!([".fits"],hdf5_ext)))
+        if endswith(fn, ".fits")
+            f = FITS(fn, "r")
+            delta = read(f[1])
+            close(f)
+        elseif any(endswith.(fn, hdf5_ext))
+            f = h5open(fn, "r")
+            # pos = read(f)  ## FIX
+            close(f)
+        else
+            throw(ErrorException("Input file format not recognised. Allowed formats are " * append!([".fits"],hdf5_ext)))
+        end
+
+        return delta 
     end
 
-    return pos, wts
 end
 
 """
@@ -41,20 +76,24 @@ function save_void_cat(output::VoidParameters.OutputParams, fn::String, void_cat
     end 
 
     out_file = output.output_folder * fn
-    println("Writing void catalogue to file...")
+    println("\nWriting void catalogue to file...")
     if output_settings.output_type == "fits"
-        f = FITS(out_file*".fits", "w")
-        data = Dict(String.(fieldnames(Main.SphericalVoids.VoidData)) .=> getfield.(Ref(void_cat), fieldnames(Main.SphericalVoids.VoidData)))
+        data = Dict("positions" => void_cat.positions, "radii" => void_cat.radii)
+        f = FITS(out_file * ".fits", "w")
         write(f, data)
         close(f)
+        vsf = Dict("r_bins" => void_cat.vsf[:,1], "vsf" => void_cat.vsf[:,2])
+        g = FITS(out_file * "_vsf.fits", "w")
+        write(g, vsf)
+        close(g)
     elseif output_settings.output_type == "txt"
-        writedlm(out_file*"_positions.txt",void_cat.positions)
-        writedlm(out_file*"_radii.txt",void_cat.radii)
-        writedlm(out_file*"_vsf.txt",void_cat.vsf)
+        writedlm(out_file * "_positions.txt",void_cat.positions)
+        writedlm(out_file * "_radii.txt",void_cat.radii)
+        writedlm(out_file * "_vsf.txt",void_cat.vsf)
     else
         throw(ErrorException("Output file format not recognised. Allowed formats are .fits and .txt"))
     end
-    println("Void catalogue written to " * out_file)
+    println("Void catalogue written to " * output.output_folder)
 end
 
 s = ArgParseSettings()
@@ -110,21 +149,18 @@ end
 # read input data
 if input_settings.build_mesh
     println("Galaxy positions taken as input.")
-    gal_pos, gal_wts = read_input(args["data"])
+    gal_data = read_input(input_settings, args["data"])
     if args["randoms"] == nothing
-        cat = GalaxyCatalogue(gal_pos, gal_wts)
+        cat = GalaxyCatalogue(gal_data...)
     else
-        rand_pos, rand_wts = read_input(args["randoms"])
-        cat = GalaxyCatalogue(gal_pos, gal_wts, rand_pos, rand_wts)
+        rand_data = read_input(input_settings, args["randoms"])
+        cat = GalaxyCatalogue(gal_data..., rand_data...)
     end
     delta = create_mesh(cat, mesh_settings, input_settings)
 else
     println("Density mesh taken as input.")
-    # delta = read_input(args["data"])   ## FIX
+    delta = read_input(input_settings, args["data"])
 end
-
-# delta = npzread("data/delta_pyrecon_500.npy")
-# delta = convert(Array{Float32,3},delta) 
 
 if input_settings.run_spherical_vf
     # list input parameters

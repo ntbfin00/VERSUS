@@ -3,8 +3,8 @@ module MeshBuilder
 export GalaxyCatalogue, create_mesh
 
 using PyCall
+using FITSIO
 
-np = pyimport("numpy")
 recon = pyimport("pyrecon.recon")
 
 """
@@ -17,61 +17,75 @@ Randoms set to size 0 matrix when not specified.
 """
 struct GalaxyCatalogue
     gal_pos::Array{AbstractFloat,2}
-    gal_wts::Array{AbstractFloat,2}
+    gal_wts::Array{AbstractFloat,1}
     rand_pos::Array{AbstractFloat,2}
-    rand_wts::Array{AbstractFloat,2}
-    function GalaxyCatalogue(gal_pos,gal_wts,rand_pos=Array{AbstractFloat}(undef,0,0),rand_wts=Array{AbstractFloat}(undef,0,0))
+    rand_wts::Array{AbstractFloat,1}
+    function GalaxyCatalogue(gal_pos,gal_wts=Array{AbstractFloat}(undef,0),rand_pos=Array{AbstractFloat}(undef,0,0),rand_wts=Array{AbstractFloat}(undef,0))
         new(gal_pos,gal_wts,rand_pos,rand_wts)
     end
 end
 
-function create_mesh(cat::GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams; boxcenter=par.box_length/2)
+function create_mesh(cat::GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams)
     println("\n ==== Creating density mesh ==== ")
 
-    if !mesh.is_box && size(cat.rand_pos,1) != 0
+    if !mesh.is_box && size(cat.rand_pos,1) == 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    gal_pos = np.array(cat.gal_pos)
-    gal_wts = np.array(cat.gal_wts)
-
     # check if randoms have same weight as data
-    rec = recon.BaseReconstruction(nmesh=mesh.nbins, boxsize=input.box_length, boxcenter=boxcenter,dtype=mesh.dtype, nthreads=Threads.nthreads()) # box center alright??
+    rec = recon.BaseReconstruction(nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
 
     println("Assigning galaxies to grid...")
-    rec.assign_data(gal_pos, gal_wts)
+    if size(cat.gal_wts,1) == 0
+        rec.assign_data(cat.gal_pos)
+    else
+        rec.assign_data(cat.gal_pos, cat.gal_wts)
+    end
 
     if mesh.is_box
         rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
 
         if mesh.do_recon
-            println("Running reconstruction...")
-            rec.run()
-            rec_gal_pos = rec.read_shifted_positions(gal_pos)
-            rec.assign_data(rec_gal_pos, gal_wts)
-            rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+            # println("Running reconstruction...")
+            # rec.run()
+            # rec_gal_pos = rec.read_shifted_positions(cat.gal_pos)
+            # rec.assign_data(rec_gal_pos, cat.gal_wts)
+            # rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
         end
 
     else
-        rand_pos = np.array(cat.rand_pos)
-        rand_wts = np.array(cat.rand_wts)
         println("Assigning randoms to grid...")
-        rec.assign_randoms(rand_pos, rand_wts)
+        if size(cat.rand_wts) == 0
+            rec.assign_randoms(cat.rand_pos)
+        else
+            rec.assign_randoms(cat.rand_pos, cat.rand_wts)
+        end
         rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
 
         if mesh.do_recon
             println("Running reconstruction...")
-            rec.run()
-            rec_gal_pos = rec.read_shifted_positions(gal_pos)
-            rec.assign_data(rec_gal_pos, gal_wts)
-            rec_rand_pos = rec.read_shifted_positions(rand_pos) # do i need this step?
-            rec.assign_randoms(rec_rand_pos, rand_wts)
-            rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+            # rec.run()
+            # rec_gal_pos = rec.read_shifted_positions(cat.gal_pos)
+            # rec.assign_data(rec_gal_pos, cat.gal_wts)
+            # rec_rand_pos = rec.read_shifted_positions(cat.rand_pos) # do i need this step?
+            # rec.assign_randoms(rec_rand_pos, cat.rand_wts)
+            # rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
         end
     end
 
     delta = rec.mesh_delta.value
     println(string(typeof(delta))[7:13]," density mesh set.")
+    if mesh.save_mesh
+        if !isdir("mesh/")
+            mkdir("mesh/")
+        end 
+        fn = "mesh/mesh_" * string(mesh.nbins) * "_" * mesh.dtype * ".fits"
+        f = FITS(fn, "w")
+        write(f, delta)
+        close(f)
+        println(fn * " saved to file.")
+    end
+        
     delta
 
 end

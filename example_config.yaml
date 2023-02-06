@@ -1,6 +1,9 @@
 input:
   threading: 
+  data_cols:
+  rand_cols:
   box_length: 
+  box_centre:
   verbose: 
   build_mesh: 
   run_voidfinder:
@@ -19,6 +22,7 @@ mesh:
   omega_m:
   f:
   bias:
+  save_mesh:
 
 spherical_voids:
   output_fn:
