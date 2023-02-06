@@ -1,13 +1,19 @@
 # VERSUS
 ### Void Extraction in Real-space from SUrveys and Simulations
 Void-finding with optional real-space reconstruction for use with both simulated data and survey data. The following void-types will be implemented:
-- Zobov based voids
+- Spherical based voids (based on [Pylians3](https://github.com/franciscovillaescusa/Pylians3))
 - Voxel based voids
-- Spherical based voids
+- Zobov based voids
+
+```<void_type>voids.jl``` are the void-finding algorithms for voids of type <void_type>. These take a density mesh as input.
 
 ```voidparameters.jl``` is used to set the void-finding options.
 
-```<void_type>voids.jl``` contain the void-finding routines for voids of type <void_type>.
+```meshbuilder.jl``` utilises [Pyrecon](https://github.com/cosmodesi/pyrecon) to create a density mesh from galaxy positions.
+
+```versus.jl``` script can be run from the command line.
+
+```example_config.yaml``` provides all the config options for running from the command line.
 
 ## Requirements
 
@@ -24,13 +30,14 @@ To run from command line (optional):
 - ArgParse.jl
 - FITSIO.jl
 - HDF5.jl
+- DelimitedFiles.jl
 
 ## Usage
 Run mesh building:
 ```
 mesh_settings = MeshParams(; **kwargs)
 input_settings = InputParams(; **kwargs)
-cat = GalaxyCatalogue(<xyz galaxy positions>, <galaxy weights>, [<xyz random positions>], [<random weights>])
+cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
 delta = create_mesh(cat, mesh_settings, input_settings)
 ```
 
@@ -40,11 +47,10 @@ input_settings = InputParams(; **kwargs)
 par = VoidParams(; **kwargs)
 vf = SphericalVoids.run_voidfinder(<delta mesh>, input_settings, par)
 
-vf.type  # void type
+vf.type       # void type
 vf.positions  # void positions
-vf.radii  # void radii
-vf.vsf  # void size function
-vf.rbins  # corresponding radius bins
+vf.radii      # void radii
+vf.vsf        # void size function (r, vsf)
 ```
 
 Run mesh building and void finding direct from command line:
