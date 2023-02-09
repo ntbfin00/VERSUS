@@ -28,6 +28,7 @@ To use in-built Pyrecon mesh builder (optional):
 To run from command line (optional):
 - PyCall.jl
 - ArgParse.jl
+- YAML.jl
 - FITSIO.jl
 - HDF5.jl
 - DelimitedFiles.jl
