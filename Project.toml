@@ -1,0 +1,15 @@
+name = "VERSUS"
+uuid = "f646c1cf-0e0e-4cfb-bd5b-bc29a0850bb6"
+authors = ["ntbfin00 <nathan.findlay@port.ac.uk>"]
+version = "0.1.0"
+
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
