@@ -23,6 +23,7 @@ Minimal requirements:
 - Printf.jl
 
 To use in-built Pyrecon mesh builder (optional):
+- Pyrecon
 - PyCall.jl
 
 To run from command line (optional):
@@ -57,6 +58,6 @@ vf.vsf        # void size function (r, vsf)
 Run mesh building and void finding direct from command line:
 
 ```
-/path/to/julia [-t <n_threads>] versus.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
+/path/to/julia [-t <n_threads>] src/VERSUS.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
 ```
 To supply a pre-computed mesh (instead of galaxy positions), set ```input["build_mesh"] = false```.
