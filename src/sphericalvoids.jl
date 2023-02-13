@@ -76,6 +76,10 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
     # k = fftfreq(dims, dims)
     # k2 = [kx*kx + ky*ky + kz*kz for kx in k,ky in k,kz in 0:middle]
     # kR = 2.0*pi*R/box_length * sqrt.(k2)
+    # # for i=2:length(kR)
+       # # kk = kR[i]
+       # # delta_k[i] *= 3.0*(sin.(kk) - cos.(kk).*kk)./(kk.^3)
+    # # end
     # delta_k .*= 3.0*(sin.(kR) - cos.(kR).*kR)./(kR.^3)
     # delta_k[1,1,1] = 0
 
@@ -86,16 +90,19 @@ end
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,threading::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,fft_plan,threading::Bool)
 
     # check parallelisation is to be used
     if !threading
         throw(ErrorException("Threading is set to False, cannot use this function!"))
     end
 
-    # # compute FFT of the field
-    P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
-    delta_k = P * delta
+    # compute FFT of the field
+    if fft_plan == nothing
+        println("Creating fft plan...")
+        fft_plan = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
+    end
+    delta_k = fft_plan * delta
 
     # loop over independent modes
     prefact = 2.0*pi*R/box_length
@@ -135,8 +142,10 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
         end
     end
 
-    P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
-    real.(P * delta_k)
+    return fft_plan, real.(fft_plan \ delta_k)
+
+    # P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
+    # real.(P * delta_k)
 
     # P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
     # delta_k = P * delta
@@ -486,7 +495,7 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams) 
+function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
     println("\n ==== Void-finding with spherical-based method ==== ")
     if input.threading
         if Threads.nthreads() == 1
@@ -548,7 +557,7 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
         if !input.threading
             delta_sm = smoothing(delta, dims, middle, R, input.box_length)
         else
-            delta_sm = smoothing(delta, dims, middle, R, input.box_length, input.threading)
+            fft_plan, delta_sm = smoothing(delta, dims, middle, R, input.box_length, fft_plan, input.threading)
         end
 
         if minimum(delta_sm)>threshold

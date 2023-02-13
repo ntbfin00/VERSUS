@@ -1,11 +1,13 @@
 module MeshBuilder
 
-export GalaxyCatalogue, create_mesh
+export GalaxyCatalogue, create_mesh, cartesian
 
 using PyCall
 using FITSIO
 
-recon = pyimport("pyrecon.recon")
+# recon = pyimport("pyrecon.recon")
+recon = pyimport("pyrecon.iterative_fft_particle")
+utils = pyimport("pyrecon.utils")
 
 """
 GalaxyCatalogue.gal_pos - galaxy positions (x,y,z)
@@ -25,6 +27,19 @@ struct GalaxyCatalogue
     end
 end
 
+function cartesian(positions::Array{AbstractFloat,2}, format::String)
+    if format == "xyz"
+        println("Cartesian positions provided.")
+        return positions
+    elseif format == "rdz"
+        println("Converting sky positions to cartesian...")
+        return utils.sky_to_cartesian(positions[:,3],positions[:,1],positions[:,2])
+    else
+        throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
+    end
+
+end
+
 function create_mesh(cat::GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams)
     println("\n ==== Creating density mesh ==== ")
 
@@ -32,8 +47,7 @@ function create_mesh(cat::GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,i
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    # check if randoms have same weight as data
-    rec = recon.BaseReconstruction(nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
+    rec = recon.IterativeFFTParticleReconstruction(f=mesh.f,bias=mesh.bias,nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
 
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0

@@ -5,8 +5,8 @@ using Parameters
 
 @with_kw struct InputParams
     threading::Bool = false
-    data_cols::Array{String,1} = ["x","y","z"]
-    rand_cols::Array{String,1} = ["x","y","z"]
+    data_format::String = "xyz"  # xyz or rdz (if rdz, must be provided in Degrees)
+    data_cols::Array{String,1} = ["x","y","z"]  # weights can be supplied as a 4th column
     box_length::Float64 = 1500.
     box_centre::Array{Float64,1} = [box_length/2, box_length/2, box_length/2]
     verbose::Bool = false
