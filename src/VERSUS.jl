@@ -98,6 +98,19 @@ function save_void_cat(output::VoidParameters.OutputParams, fn::String, void_cat
     println("Void catalogue written to " * output.output_folder)
 end
 
+
+function filt(x,wts,llim,ulim)
+    if size(x,1) != 0
+        println("Removing out-of-bound particles...")
+        indx = [i for i in 1:size(x,1) if all(j -> llim < j < ulim, x[i,:])]
+        x = x[indx,:]
+        if size(wts,1) != 0 
+            wts = wts[indx]
+        end
+    end
+    return x, wts
+end
+
 s = ArgParseSettings()
 @add_arg_table! s begin
     "--data"
@@ -112,6 +125,7 @@ s = ArgParseSettings()
         required = true
         arg_type = String
 end
+
 
 args = parse_args(ARGS, s)
 
@@ -159,17 +173,30 @@ if input_settings.build_mesh
         rand_data = read_input(input_settings, args["randoms"])
         cat = GalaxyCatalogue(gal_data..., rand_data...)
     end
-    delta = create_mesh(cat, mesh_settings, input_settings)
 else
     println("Reading density mesh...")
-    delta = read_input(input_settings, args["data"])
+    mesh = read_input(input_settings, args["data"])
+end
+
+
+# run optional reconstruction
+if input_settings.build_mesh && mesh_settings.do_recon
+    cat = reconstruction(cat, mesh_settings, input_settings)
+
+    # remove galaxies outside of box bounds
+    cat.gal_pos, cat.gal_wts = filt(cat.gal_pos, cat.gal_wts, 0, input_settings.box_length)
+    cat.rand_pos, cat.rand_wts = filt(cat.rand_pos, cat.rand_wts, 0, input_settings.box_length)
 end
 
 if input_settings.run_spherical_vf
     # list input parameters
     SphericalVoids.get_params(par_sph)
     # run voidfinder 
-    spherical_voids = SphericalVoids.run_voidfinder(delta, input_settings, par_sph)
+    if input_settings.build_mesh
+        spherical_voids = SphericalVoids.voidfinder(cat, mesh_settings, input_settings, par_sph)
+    else
+        spherical_voids = SphericalVoids.voidfinder(mesh, input_settings, par_sph)
+    end
     save_void_cat(output_settings, par_sph.output_fn, spherical_voids)
 else
     throw(ErrorException("No void finder selected. Cannot proceed."))

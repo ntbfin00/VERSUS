@@ -3,6 +3,9 @@ Adapted from https://github.com/franciscovillaescusa/Pylians3
 """
 module SphericalVoids  # create module to be loaded in main file
 
+include("meshbuilder.jl")
+
+using .MeshBuilder
 using Printf
 using FFTW
 
@@ -11,7 +14,6 @@ struct VoidData
     positions::Array{Float64,2}
     radii::Array{Float64,1}
     vsf::Array{Float64,2}
-    # rbins::Array{Float64,1}
 end
 
 """
@@ -495,8 +497,8 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
-    println("\n ==== Void-finding with spherical-based method ==== ")
+function voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
+    println("\n ==== Void-finding on field with spherical-based method ==== ")
     if input.threading
         if Threads.nthreads() == 1
             throw(ErrorException("Threading set to True but only 1 thread in use."))
@@ -668,7 +670,20 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
              void_pos[1:voids_total,:]*res .+ box_shift',
              void_radius[1:voids_total]*res,
              vsf)
-             # r_bin_centres)
+
+end
+
+
+"""
+Void finding with galaxy positions.
+"""
+function voidfinder(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
+
+    mesh.do_recon = false
+    mesh.r_smooth = 0.0
+    delta = create_mesh(cat, mesh, input)
+
+    voidfinder(delta, input, par; fft_plan = fft_plan)
 
 end
 
