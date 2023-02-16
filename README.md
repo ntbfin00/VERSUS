@@ -5,14 +5,6 @@ Void-finding with optional real-space reconstruction for use with both simulated
 - Voxel based voids
 - Zobov based voids
 
-```<void_type>voids.jl``` are the void-finding algorithms for voids of type <void_type>. These take a density mesh as input.
-
-```voidparameters.jl``` is used to set the void-finding options.
-
-```meshbuilder.jl``` utilises [Pyrecon](https://github.com/cosmodesi/pyrecon) to create a density mesh from galaxy positions.
-
-```versus.jl``` script can be run from the command line.
-
 ```example_config.yaml``` provides all the config options for running from the command line.
 
 ## Requirements
