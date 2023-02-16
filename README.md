@@ -20,12 +20,10 @@ Void-finding with optional real-space reconstruction for use with both simulated
 Minimal requirements:
 - Parameters.jl
 - FFTW.jl
+- PyCall.jl
 - Printf.jl
 
-To use in-built Pyrecon mesh builder (optional):
-- PyCall.jl
-
-To run from command line (optional):
+To run from command line:
 - PyCall.jl
 - ArgParse.jl
 - YAML.jl
@@ -34,29 +32,37 @@ To run from command line (optional):
 - DelimitedFiles.jl
 
 ## Usage
-Run mesh building:
+Run reconstruction on galaxy positions:
 ```
+cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
 mesh_settings = MeshParams(; **kwargs)
 input_settings = InputParams(; **kwargs)
-cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
-delta = create_mesh(cat, mesh_settings, input_settings)
+
+cat_recon = reconstruction(cat, mesh_settings, input_settings)
 ```
 
 Run void finding:
 ```
+cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
+mesh_settings = MeshParams(; **kwargs)
 input_settings = InputParams(; **kwargs)
-par = VoidParams(; **kwargs)
-vf = SphericalVoids.run_voidfinder(<delta mesh>, input_settings, par)
 
+# e.g. Spherical voidfinder
+par = SphericalVoidParams(; **kwargs)
+vf = SphericalVoids.voidfinder(cat, mesh_settings, input_settings, par)
+
+# or to supply a precomputed mesh use...
+vf = SphericalVoids.voidfinder(<delta mesh>, input_settings, par)
+
+# Output:
 vf.type       # void type
 vf.positions  # void positions
 vf.radii      # void radii
 vf.vsf        # void size function (r, vsf)
 ```
 
-Run mesh building and void finding direct from command line:
-
+Run reconstruction and void finding direct from command line:
 ```
-/path/to/julia [-t <n_threads>] versus.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
+julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
 ```
-To supply a pre-computed mesh (instead of galaxy positions), set ```input["build_mesh"] = false```.
+To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false```.
