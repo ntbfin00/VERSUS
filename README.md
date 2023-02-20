@@ -10,17 +10,16 @@ Void-finding with optional real-space reconstruction for use with both simulated
 ## Requirements
 
 Minimal requirements:
-- Parameters.jl
-- FFTW.jl
+- Pyrecon
 - PyCall.jl
+- FFTW.jl
+- Parameters.jl
 - Printf.jl
 
 To run from command line:
-- PyCall.jl
 - ArgParse.jl
 - YAML.jl
 - FITSIO.jl
-- HDF5.jl
 - DelimitedFiles.jl
 
 ## Usage
