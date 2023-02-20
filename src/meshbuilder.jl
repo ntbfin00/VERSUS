@@ -6,7 +6,6 @@ using PyCall
 using FITSIO
 
 np = pyimport("numpy")
-recon = pyimport("pyrecon.iterative_fft_particle")
 utils = pyimport("pyrecon.utils")
 
 
@@ -45,18 +44,36 @@ end
 """
 Set algorithm for reconstruction.
 """
-function set_recon_engine(mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams)
+function set_recon_engine(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams)
+
+    # determine box size from input
+    if mesh.is_box
+        los = mesh.los
+        boxsize = [mesh.box_length, mesh.box_length, mesh.box_length]
+        boxcenter = mesh.box_centre
+        boxpad = 1.
+        pos = nothing
+    # determine box size from random positions and padding
+    else 
+        los = nothing
+        boxsize = nothing
+        boxcenter = nothing
+        boxpad = mesh.padding
+        pos = np.array(cat.rand_pos)
+    end
 
     if mesh.recon_alg == "IFFTparticle"
-        rec = recon.IterativeFFTParticleReconstruction(f=mesh.f,bias=mesh.bias,nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
-        data = ["data", "data"]
+        recon = pyimport("pyrecon.iterative_fft_particle")
+        rec = recon.IterativeFFTParticleReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        data = "data"
     elseif mesh.recon_alg == "IFFT"
-        rec = recon.IterativeFFTReconstruction(f=mesh.f,bias=mesh.bias,nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
-        data = [cat.gal_pos, cat.gal_rand]
+        recon = pyimport("pyrecon.iterative_fft")
+        rec = recon.IterativeFFTReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        data = np.array(cat.gal_pos)
     elseif mesh.recon_alg == "MultiGrid"
-        rec = recon.MultiGridReconstruction(nmesh=mesh.nbins, boxsize=[input.box_length,input.box_length,input.box_length], boxcenter=input.box_centre, boxpad=mesh.padding, dtype=mesh.dtype, nthreads=Threads.nthreads())
-        set_cosmo(f=mesh.f,bias=mesh.bias)
-        data = [cat.gal_pos, cat.gal_rand]
+        recon = pyimport("pyrecon.multigrid")
+        rec = recon.MultiGridReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        data = np.array(cat.gal_pos)
     else
         throw(ErrorException("Reconstruction algorithm not recognised. Allowed algorithms are IFFTparticle, IFFT and MultiGrid."))
     end
@@ -67,17 +84,16 @@ end
 
 
 """
-Run reconstruction on galaxy and random positions. Returns a GalaxyCatalogue object.
+Run reconstruction on galaxy positions. Returns a GalaxyCatalogue object.
 """
-function reconstruction(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams)
-
+function reconstruction(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     println("\n ==== Density field reconstruction ==== ")
 
     if !mesh.is_box && size(cat.rand_pos,1) == 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    rec, data = set_recon_engine(mesh, input)
+    rec, data = set_recon_engine(cat, mesh)
     gal_pos = np.array(cat.gal_pos)
 
     println("Assigning galaxies to grid...")
@@ -89,48 +105,29 @@ function reconstruction(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidPar
         rec.assign_data(gal_pos, gal_wts)
     end
 
-    if mesh.is_box
-        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+    rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
 
-        println("Running reconstruction...")
-        rec.run()
-        rec_gal_pos = rec.read_shifted_positions(data[1], field="rsd")
-        println("Galaxy positions reconstructed.")
-        return GalaxyCatalogue(rec_gal_pos, cat.gal_wts)
-
-    else
-        println("Assigning randoms to grid...")
-        if size(cat.rand_wts) == 0
-            rand_pos = np.array(cat.rand_pos)
-            rec.assign_randoms(rand_pos)
-        else
-            rand_wts = np.array(cat.rand_wts)
-            rec.assign_randoms(rand_pos, rand_wts)
-        end
-        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
-
-        println("Running reconstruction...")
-        rec.run()
-        rec_gal_pos = rec.read_shifted_positions(data[1], field="rsd")
-        rec_rand_pos = rec.read_shifted_positions(data[2], field="rsd") 
-        println("Galaxy and random positions reconstructed.")
-        return GalaxyCatalogue(rec_gal_pos, cat.gal_wts, rec_rand_pos, cat.rand_wts)
-    end
+    println("Running reconstruction with ", mesh.recon_alg, "...")
+    rec.run()
+    rec_gal_pos = rec.read_shifted_positions(data, field="rsd")
+    println("Galaxy positions reconstructed.")
+    
+    GalaxyCatalogue(rec_gal_pos, cat.gal_wts, cat.rand_pos, cat.rand_wts)
 
 end
 
 
 """
-Create density mesh from galaxy and random positions.
+Create density mesh from galaxy and random positions. Returns 3D density mesh, box length and box centre.
 """
-function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams,input::Main.VoidParameters.InputParams)
+function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     println("\n ==== Creating density mesh ==== ")
 
     if !mesh.is_box && size(cat.rand_pos,1) == 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    rec = set_recon_engine(mesh, input)[1]
+    rec = set_recon_engine(cat, mesh)[1]
 
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0
@@ -170,7 +167,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParame
         println(fn * " saved to file.")
     end
         
-    delta
+    return delta, rec.boxsize[1], rec.boxcenter
 
 end
 
