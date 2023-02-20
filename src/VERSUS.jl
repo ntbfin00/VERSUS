@@ -93,7 +93,6 @@ function save_void_cat(output_folder::String, output_type::String, fn::String, v
 end
 
 
-
 s = ArgParseSettings()
 @add_arg_table! s begin
     "--data"
@@ -164,9 +163,6 @@ end
 # run optional reconstruction
 if build_mesh && mesh_settings.do_recon
     cat = reconstruction(cat, mesh_settings)
-    println("VERSUS reconstruction:",size(cat.gal_pos))
-    println(cat.gal_pos[1:100,1])
-
 end
 
 if run_spherical_vf
