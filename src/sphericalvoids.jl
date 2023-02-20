@@ -3,6 +3,9 @@ Adapted from https://github.com/franciscovillaescusa/Pylians3
 """
 module SphericalVoids  # create module to be loaded in main file
 
+include("meshbuilder.jl")
+
+using .MeshBuilder
 using Printf
 using FFTW
 
@@ -11,7 +14,6 @@ struct VoidData
     positions::Array{Float64,2}
     radii::Array{Float64,1}
     vsf::Array{Float64,2}
-    # rbins::Array{Float64,1}
 end
 
 """
@@ -76,6 +78,10 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
     # k = fftfreq(dims, dims)
     # k2 = [kx*kx + ky*ky + kz*kz for kx in k,ky in k,kz in 0:middle]
     # kR = 2.0*pi*R/box_length * sqrt.(k2)
+    # # for i=2:length(kR)
+       # # kk = kR[i]
+       # # delta_k[i] *= 3.0*(sin.(kk) - cos.(kk).*kk)./(kk.^3)
+    # # end
     # delta_k .*= 3.0*(sin.(kR) - cos.(kR).*kR)./(kR.^3)
     # delta_k[1,1,1] = 0
 
@@ -86,16 +92,19 @@ end
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,threading::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,fft_plan,threading::Bool)
 
     # check parallelisation is to be used
     if !threading
         throw(ErrorException("Threading is set to False, cannot use this function!"))
     end
 
-    # # compute FFT of the field
-    P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
-    delta_k = P * delta
+    # compute FFT of the field
+    if fft_plan == nothing
+        println("Creating fft plan...")
+        fft_plan = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
+    end
+    delta_k = fft_plan * delta
 
     # loop over independent modes
     prefact = 2.0*pi*R/box_length
@@ -135,8 +144,10 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
         end
     end
 
-    P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
-    real.(P * delta_k)
+    return fft_plan, real.(fft_plan \ delta_k)
+
+    # P = plan_irfft(delta_k, dims, [3,1,2]; num_threads=Threads.nthreads())
+    # real.(P * delta_k)
 
     # P = plan_rfft(delta, [3,1,2]; num_threads=Threads.nthreads())
     # delta_k = P * delta
@@ -486,17 +497,14 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParameters.InputParams, par::Main.VoidParameters.SphericalVoidParams) 
-    println("\n ==== Void-finding with spherical-based method ==== ")
-    if input.threading
-        if Threads.nthreads() == 1
-            throw(ErrorException("Threading set to True but only 1 thread in use."))
-        end
-        println("\nMultithreading active: n=",Threads.nthreads()," threads in use.")
+function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Float64, box_centre::Array{Float64,1}, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
+    println("\n ==== Void-finding on field with spherical-based method ==== ")
+
+    if Threads.nthreads() == 1
+        threading = false
     else
-        if Threads.nthreads() > 1
-            throw(ErrorException("Threading set to False but attempting to use >1 threads."))
-        end
+        threading = true 
+        println("\nMultithreading active: n=",Threads.nthreads()," threads in use.")
     end
 
     dims = size(delta,1)
@@ -505,7 +513,7 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     middle = dims÷2
     r_bins = size(par.radii,1)
 
-    res::Float64 = input.box_length/dims
+    res::Float64 = box_length/dims
 
     # set minimum overdensity threshold
     threshold = par.min_dens_cut - 1
@@ -520,8 +528,8 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     end
     # determine the maximum possible number of voids
     vol_eff = (1.0-par.max_overlap_frac)*(4*pi*Rmin^3)/3  # minimum effective void volume
-    voids_max = floor(Int64, input.box_length/vol_eff)
-    if input.verbose && par.max_overlap_frac == 0
+    voids_max = floor(Int64, box_length/vol_eff)
+    if par.verbose && par.max_overlap_frac == 0
         @printf("\nMaximum number of voids = %d\n", voids_max)
     end
 
@@ -541,14 +549,14 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     voids_total::Int32 = 0  # total number of voids found
     expected_filling_frac::Float64 = 0.0
     for (q,R) in enumerate(Radii)  
-        if input.verbose
+        if par.verbose
             @printf("\nSmoothing galaxy density field with top-hat filter of radius %.2f...\n", R)
         end
 
-        if !input.threading
-            delta_sm = smoothing(delta, dims, middle, R, input.box_length)
+        if !threading
+            delta_sm = smoothing(delta, dims, middle, R, box_length)
         else
-            delta_sm = smoothing(delta, dims, middle, R, input.box_length, input.threading)
+            fft_plan, delta_sm = smoothing(delta, dims, middle, R, box_length, fft_plan, threading)
         end
 
         if minimum(delta_sm)>threshold
@@ -571,7 +579,9 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
                 end
             end
         end
-        @printf("Found %d cells with delta < %.2f\n", local_voids, threshold)
+        if par.verbose
+            @printf("Found %d cells with delta < %.2f\n", local_voids, threshold)
+        end
 
         # sort cells underdensities
         indx = sortperm(delta_v[1:local_voids])
@@ -588,7 +598,10 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
             mode = 1
         end
 
-        @printf("Identifying nearby voids using mode %d...\n", mode)
+        if par.verbose
+            @printf("Identifying nearby voids using mode %d...\n", mode)
+        end
+
         # identify if underdense cells belong to previously detected voids
         voids_with_R = 0  # voids found with radius R
         for ID in IDs[1:local_voids]
@@ -602,10 +615,10 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
             if mode==0 
                 nearby_voids = nearby_voids1(voids_total, dims, middle, i, j, k, void_radius, void_pos, R_grid, par.max_overlap_frac)
             else
-                if !input.threading
+                if !threading
                     nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac)
                 else
-                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, input.threading)
+                    nearby_voids = nearby_voids2(Ncells, dims, i, j, k, R_grid, R_grid2, in_void, par.max_overlap_frac, threading)
                 end
             end
 
@@ -619,10 +632,10 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
 
                 # flag cells belonging to new void
                 in_void[i,j,k] = 1
-                if !input.threading
+                if !threading
                     mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void)
                 else
-                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, input.threading)
+                    mark_void_region!(Ncells, dims, i, j, k, R_grid2, in_void, threading)
                 end
 
             end
@@ -632,11 +645,11 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
         Nvoids[q] = voids_with_R
 
         @printf("Found %d voids with radius R = %.3f Mpc/h\n",voids_with_R,R)
-        if input.verbose 
+        if par.verbose 
             @printf("Found %d voids with radius R >= %.3f Mpc/h\n",voids_total,R)
             @printf("Void volume filling fraction = %.3f\n",sum(in_void)/dims3)
             if par.max_overlap_frac == 0
-                expected_filling_frac += voids_with_R*4*pi*R^3/(3*input.box_length^3)
+                expected_filling_frac += voids_with_R*4*pi*R^3/(3*box_length^3)
                 @printf("Expected filling fraction = %.3f\n",expected_filling_frac)
             end
         end
@@ -650,16 +663,29 @@ function run_voidfinder(delta::Array{<:AbstractFloat,3}, input::Main.VoidParamet
     for i = 1:r_bins
         r = vcat(Radii, 0)
         vsf[i,1] = 0.5*(r[i]+r[i+1])
-        vsf[i,2] = Nvoids[i]/(input.box_length^3*(r[i]-r[i+1]))
+        vsf[i,2] = Nvoids[i]/(box_length^3*(r[i]-r[i+1]))
     end
 
-    box_shift = input.box_centre .- input.box_length/2
-    # ouput data as a struct instance
+    box_shift = box_centre .- box_length/2
+    # output data 
     VoidData("Spherical",
              void_pos[1:voids_total,:]*res .+ box_shift',
              void_radius[1:voids_total]*res,
              vsf)
-             # r_bin_centres)
+
+end
+
+
+"""
+Void finding with galaxy positions.
+"""
+function voidfinder(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
+
+    mesh.do_recon = false
+    mesh.r_smooth = 0.0
+    mesh_obj = create_mesh(cat, mesh)
+
+    voidfinder(mesh_obj..., par; fft_plan = fft_plan)
 
 end
 
