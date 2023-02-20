@@ -28,23 +28,21 @@ Run reconstruction on galaxy positions:
 ```
 cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
 mesh_settings = MeshParams(; **kwargs)
-input_settings = InputParams(; **kwargs)
 
-cat_recon = reconstruction(cat, mesh_settings, input_settings)
+cat_recon = reconstruction(cat, mesh_settings)
 ```
 
 Run void finding:
 ```
 cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
 mesh_settings = MeshParams(; **kwargs)
-input_settings = InputParams(; **kwargs)
 
 # e.g. Spherical voidfinder
 par = SphericalVoidParams(; **kwargs)
-vf = SphericalVoids.voidfinder(cat, mesh_settings, input_settings, par)
+vf = SphericalVoids.voidfinder(cat, mesh_settings, par)
 
 # or to supply a precomputed mesh use...
-vf = SphericalVoids.voidfinder(<delta mesh>, input_settings, par)
+vf = SphericalVoids.voidfinder(<3D delta array>, <side length>, <1D mesh centre array>, par)
 
 # Output:
 vf.type       # void type
@@ -55,6 +53,6 @@ vf.vsf        # void size function (r, vsf)
 
 Run reconstruction and void finding direct from command line:
 ```
-julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml file> --data <fits, hdf5 file> [--randoms <fits, hdf5 file>]
+julia [-t <n_threads>] --project=<path/to/directory> src/VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
 ```
 To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false```.
