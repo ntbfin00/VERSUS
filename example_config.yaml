@@ -2,6 +2,7 @@ input:
   data_format:
   data_cols:
   build_mesh: 
+  do_recon:
   run_spherical_vf:
 
 output:
@@ -16,7 +17,6 @@ mesh:
   box_length:
   box_centre:
   padding:
-  do_recon: 
   recon_alg:
   los:
   r_smooth:

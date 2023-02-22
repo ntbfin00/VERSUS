@@ -123,6 +123,7 @@ if endswith(args["config"], ".yaml")
     data_format = get(config["input"], "data_format", "xyz")
     data_cols = get(config["input"], "data_cols", ["x","y","z"])
     build_mesh = get(config["input"], "build_mesh", true)
+    do_recon = get(config["input"], "do_recon", false)
     run_spherical_vf = get(config["input"], "run_spherical_vf", true)
     output_type = get(config["output"], "output_type", "fits")
     output_folder = get(config["output"], "output_folder", "output/")
@@ -161,7 +162,7 @@ end
 
 
 # run optional reconstruction
-if build_mesh && mesh_settings.do_recon
+if build_mesh && do_recon
     cat = reconstruction(cat, mesh_settings)
 end
 

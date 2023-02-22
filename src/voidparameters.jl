@@ -1,5 +1,5 @@
 module VoidParameters
-export InputParams, OutputParams, MeshParams, SphericalVoidParams
+export MeshParams, SphericalVoidParams
 
 using Parameters
 
@@ -8,12 +8,11 @@ using Parameters
     dtype::String = "f8"
     nbins::Int = 512
     is_box::Bool = true  # set to false for survey-like data
-    box_length::Float64 = 1.  # box length (disregarded if is_box=true)
-    box_centre::Array{Float64,1} = [box_length/2, box_length/2, box_length/2]
-    padding::Float64 = 1.5  # box padding (disregarded if is_box=true)
+    box_length::Float64 = 1.  # box length (disregarded if is_box=false)
+    box_centre::Array{Float64,1} = fill(box_length/2, 3) # box centre (disregarded if is_box=false)
+    padding::Float64 = 1.2  # box padding (disregarded if is_box=true)
 
     # reconstruction parameters
-    do_recon::Bool = false
     recon_alg::String = "IFFTparticle"
     los::String = "z"  # line-of-sight axis of box (disregarded if is_box=false)
     r_smooth::Float64 = box_length/nbins

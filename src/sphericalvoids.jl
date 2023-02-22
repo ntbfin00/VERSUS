@@ -497,7 +497,7 @@ Determine the number of voids in given overdensity mesh with radii specified at 
     5) Then repeated with next largest smoothing radius
 
 """
-function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Float64, box_centre::Array{Float64,1}, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
+function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::AbstractFloat, box_centre::Array{<:AbstractFloat,1}, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
     println("\n ==== Void-finding on field with spherical-based method ==== ")
 
     if Threads.nthreads() == 1
@@ -681,8 +681,6 @@ Void finding with galaxy positions.
 """
 function voidfinder(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
 
-    mesh.do_recon = false
-    mesh.r_smooth = 0.0
     mesh_obj = create_mesh(cat, mesh)
 
     voidfinder(mesh_obj..., par; fft_plan = fft_plan)

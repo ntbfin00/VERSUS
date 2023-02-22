@@ -46,10 +46,14 @@ Set algorithm for reconstruction.
 """
 function set_recon_engine(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams)
 
+    if !mesh.is_box && mesh.padding <= 1.0
+        @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
+    end
+
     # determine box size from input
     if mesh.is_box
         los = mesh.los
-        boxsize = [mesh.box_length, mesh.box_length, mesh.box_length]
+        boxsize = mesh.box_length
         boxcenter = mesh.box_centre
         boxpad = 1.
         pos = nothing
@@ -129,6 +133,9 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
 
     rec = set_recon_engine(cat, mesh)[1]
 
+    # use galaxy density (not matter density)
+    rec.bias = 1.
+
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0
         rec.assign_data(cat.gal_pos)
@@ -137,7 +144,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
     end
 
     if mesh.is_box
-        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+        rec.set_density_contrast(smoothing_radius=0.0)
 
         delta = rec.mesh_delta.value
         println(string(typeof(delta))[7:13]," density mesh set.")
@@ -149,7 +156,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         else
             rec.assign_randoms(cat.rand_pos, cat.rand_wts)
         end
-        rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+        rec.set_density_contrast(smoothing_radius=0.0)
 
         delta = rec.mesh_delta.value
         println(string(typeof(delta))[7:13]," density mesh set.")
