@@ -31,7 +31,7 @@ end
 """
 Top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::AbstractFloat)
 
     # compute FFT of the field
     delta_k = rfft(delta, [3,1,2])
@@ -92,7 +92,7 @@ end
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::Float64,fft_plan,threading::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::Float64,box_length::AbstractFloat,fft_plan,threading::Bool)
 
     # check parallelisation is to be used
     if !threading
@@ -528,22 +528,21 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::AbstractFloat, 
     end
     # determine the maximum possible number of voids
     vol_eff = (1.0-par.max_overlap_frac)*(4*pi*Rmin^3)/3  # minimum effective void volume
-    voids_max = floor(Int64, box_length/vol_eff)
+    voids_max = floor(Int64, box_length^3/vol_eff)
     if par.verbose && par.max_overlap_frac == 0
         @printf("\nMaximum number of voids = %d\n", voids_max)
     end
 
     # initialize arrays
-    void_pos = zeros(Int64,voids_max,3)  # void positions
-    void_radius = zeros(Float64, voids_max)  # void radii
+    void_pos = Array{Int64}(undef,voids_max,3)  # void positions
+    void_radius = Array{Float64}(undef,voids_max)  # void radii
 
     in_void = zeros(Int8,dims,dims,dims)  # void membership cell flag
     delta_v = Array{Float64}(undef,dims3)  # underdense cells density contrasts 
     IDs = Array{Int64}(undef,dims3)  # underdense cell IDs
 
-    Nvoids = zeros(Int64,r_bins)
-    vsf = zeros(Float64,r_bins,2)
-    # r_bin_centres = zeros(Float64,r_bins-1)
+    Nvoids = Array{Int64}(undef,r_bins)
+    vsf = Array{Float64}(undef,r_bins,2)
 
     # find voids at each input radius R
     voids_total::Int32 = 0  # total number of voids found

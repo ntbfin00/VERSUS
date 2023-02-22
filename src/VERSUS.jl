@@ -38,7 +38,14 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
             throw(ErrorException("Input file format not recognised. Allowed format is .fits"))
         end
 
-        pos = cartesian(pos, data_format)
+        if data_format == "xyz"
+            println("Cartesian positions provided.")
+        elseif data_format == "rdz"
+            println("Converting sky positions to cartesian...")
+            pos = to_cartesian(pos)
+        else
+            throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
+        end
 
         if wts_supplied == 0 
             return pos, Array{AbstractFloat}(undef,0)

@@ -1,6 +1,6 @@
 module MeshBuilder
 
-export GalaxyCatalogue, cartesian, reconstruction, create_mesh
+export GalaxyCatalogue, to_cartesian, reconstruction, create_mesh
 
 using PyCall
 using FITSIO
@@ -27,17 +27,20 @@ mutable struct GalaxyCatalogue
     end
 end
 
-function cartesian(positions::Array{AbstractFloat,2}, format::String)
-    if format == "xyz"
-        println("Cartesian positions provided.")
-        return positions
-    elseif format == "rdz"
-        println("Converting sky positions to cartesian...")
-        return utils.sky_to_cartesian(positions[:,3],positions[:,1],positions[:,2])
-    else
-        throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
-    end
 
+"""
+Convert sky positions and redshift to cartesian coordinates. 
+"""
+function to_cartesian(positions::Array{AbstractFloat,2}; angle::String="degrees")
+    if angle == "degrees"
+        degree = true
+    elseif angle == "radians"
+        degree = false
+    else
+        throw(ErrorException("Angle type must be either 'degrees' or 'radians'."))
+    end
+    
+    utils.sky_to_cartesian(positions[:,3],positions[:,1],positions[:,2], degree=degree)
 end
 
 
