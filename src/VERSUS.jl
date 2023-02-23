@@ -14,7 +14,7 @@ using DelimitedFiles
 """
 Read input data and randoms files in FITS. Sky positions are converted to cartesian positions.
 """
-function read_input(build_mesh::Bool, data_format::String, data_cols::Array{String,1}, fn::String)
+function read_input(build_mesh::Bool, data_format::String, data_cols::Array{String,1}, fn::String, cosmo::Main.VoidParameters.Cosmology)
     # hdf5_ext = [".hdf", ".h4", ".hdf4", ".he2", ".h5", ".hdf5", ".he5", ".h5py"]                                                          
     wts_supplied = 0
 
@@ -42,7 +42,7 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
             println("Cartesian positions provided.")
         elseif data_format == "rdz"
             println("Converting sky positions to cartesian...")
-            pos = to_cartesian(pos)
+            pos = to_cartesian(cosmo, pos)
         else
             throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
         end
@@ -135,6 +135,13 @@ if endswith(args["config"], ".yaml")
     output_type = get(config["output"], "output_type", "fits")
     output_folder = get(config["output"], "output_folder", "output/")
 
+    if any(keys(config) .== "cosmo")
+        cosmology = Dict()
+        [cosmology[Symbol(key)] = value for (key,value) in config["cosmo"]]
+        cosmo = Cosmology(;cosmology...)
+    else
+        cosmo = Cosmology()
+    end
     if any(keys(config) .== "mesh")
         mesh = Dict()
         [mesh[Symbol(key)] = value for (key,value) in config["mesh"]]
@@ -154,23 +161,23 @@ end
 # read input data
 if build_mesh
     println("\nReading galaxy position data...")
-    gal_data = read_input(build_mesh, data_format, data_cols, args["data"])
+    gal_data = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
     if args["randoms"] == nothing
         cat = GalaxyCatalogue(gal_data...)
     else
         println("\nReading randoms position data...")
-        rand_data = read_input(build_mesh, data_format, data_cols, args["randoms"])
+        rand_data = read_input(build_mesh, data_format, data_cols, args["randoms"], cosmo)
         cat = GalaxyCatalogue(gal_data..., rand_data...)
     end
 else
     println("Reading density mesh...")
-    mesh = read_input(build_mesh, data_format, data_cols, args["data"])
+    mesh = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
 end
 
 
 # run optional reconstruction
 if build_mesh && do_recon
-    cat = reconstruction(cat, mesh_settings)
+    cat = reconstruction(cosmo, cat, mesh_settings)
 end
 
 if run_spherical_vf

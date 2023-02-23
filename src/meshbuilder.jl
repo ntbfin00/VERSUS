@@ -53,7 +53,7 @@ end
 """
 Set algorithm for reconstruction.
 """
-function set_recon_engine(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidParameters.MeshParams)
+function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
 
     if !mesh.is_box && mesh.padding <= 1.0
         @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
@@ -77,15 +77,15 @@ function set_recon_engine(cat::Main.MeshBuilder.GalaxyCatalogue,mesh::Main.VoidP
 
     if mesh.recon_alg == "IFFTparticle"
         recon = pyimport("pyrecon.iterative_fft_particle")
-        rec = recon.IterativeFFTParticleReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.IterativeFFTParticleReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = "data"
     elseif mesh.recon_alg == "IFFT"
         recon = pyimport("pyrecon.iterative_fft")
-        rec = recon.IterativeFFTReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.IterativeFFTReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = np.array(cat.gal_pos)
     elseif mesh.recon_alg == "MultiGrid"
         recon = pyimport("pyrecon.multigrid")
-        rec = recon.MultiGridReconstruction(f=mesh.f, bias=mesh.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.MultiGridReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=mesh.nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = np.array(cat.gal_pos)
     else
         throw(ErrorException("Reconstruction algorithm not recognised. Allowed algorithms are IFFTparticle, IFFT and MultiGrid."))
@@ -99,14 +99,14 @@ end
 """
 Run reconstruction on galaxy positions. Returns a GalaxyCatalogue object.
 """
-function reconstruction(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
+function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     println("\n ==== Density field reconstruction ==== ")
 
     if !mesh.is_box && size(cat.rand_pos,1) == 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    rec, data = set_recon_engine(cat, mesh)
+    rec, data = set_recon_engine(cosmo, cat, mesh)
     gal_pos = np.array(cat.gal_pos)
 
     println("Assigning galaxies to grid...")
@@ -140,10 +140,8 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    rec = set_recon_engine(cat, mesh)[1]
-
-    # use galaxy density (not matter density)
-    rec.bias = 1.
+    cosmo = Main.VoidParameters.Cosmology(; bias=1.)
+    rec = set_recon_engine(cosmo, cat, mesh)[1]
 
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0

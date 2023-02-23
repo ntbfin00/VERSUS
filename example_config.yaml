@@ -9,6 +9,13 @@ output:
   output_type:
   output_folder:
 
+cosmo:
+  h:
+  omega_m:
+  omega_l:
+  f:
+  bias:
+
 mesh:
   save_mesh:
   dtype:
@@ -20,9 +27,6 @@ mesh:
   recon_alg:
   los:
   r_smooth:
-  omega_m:
-  f:
-  bias:
 
 spherical_voids:
   verbose:
