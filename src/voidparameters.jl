@@ -15,7 +15,7 @@ end
 
 @with_kw mutable struct MeshParams
     save_mesh::Bool = true
-    dtype::String = "f8"
+    dtype::String = "f4"
     nbins::Int = 512
     is_box::Bool = true  # set to false for survey-like data
     box_length::Float64 = 1.  # box length [Mpc/h] (disregarded if is_box=false)

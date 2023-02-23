@@ -111,7 +111,6 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuil
 
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0
-        gal_pos = np.array(cat.gal_pos)
         rec.assign_data(gal_pos)
     else
         gal_wts = np.array(cat.gal_wts)
@@ -143,11 +142,14 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
     cosmo = Main.VoidParameters.Cosmology(; bias=1.)
     rec = set_recon_engine(cosmo, cat, mesh)[1]
 
+    gal_pos = np.array(cat.gal_pos)
+
     println("Assigning galaxies to grid...")
     if size(cat.gal_wts,1) == 0
-        rec.assign_data(cat.gal_pos)
+        rec.assign_data(gal_pos)
     else
-        rec.assign_data(cat.gal_pos, cat.gal_wts)
+        gal_wts = np.array(cat.gal_wts)
+        rec.assign_data(gal_pos, gal_wts)
     end
 
     if mesh.is_box
@@ -158,10 +160,12 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
 
     else
         println("Assigning randoms to grid...")
+        rand_pos = np.array(cat.rand_pos)
         if size(cat.rand_wts) == 0
-            rec.assign_randoms(cat.rand_pos)
+            rec.assign_randoms(rand_pos)
         else
-            rec.assign_randoms(cat.rand_pos, cat.rand_wts)
+            rand_wts = np.array(cat.rand_wts)
+            rec.assign_randoms(rand_pos, rand_wts)
         end
         rec.set_density_contrast(smoothing_radius=0.0)
 
