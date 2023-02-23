@@ -11,6 +11,7 @@ Void-finding with optional real-space reconstruction for use with both simulated
 
 Minimal requirements:
 - Pyrecon
+- Astropy
 - PyCall.jl
 - FFTW.jl
 - Parameters.jl
@@ -25,10 +26,15 @@ To run from command line:
 ## Usage
 Run reconstruction on galaxy positions:
 ```
+cosmo = Cosmology(; **kwargs)
+
+# if conversion from sky to cartesian positions required
+<xyz positions> = to_cartesian(cosmo, <rdz positions>)
+
 cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
 mesh_settings = MeshParams(; **kwargs)
 
-cat_recon = reconstruction(cat, mesh_settings)
+cat_recon = reconstruction(cosmo, cat, mesh_settings)
 ```
 
 Run void finding:
@@ -54,4 +60,4 @@ Run reconstruction and void finding direct from command line:
 ```
 julia [-t <n_threads>] --project=<path/to/directory> src/VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
 ```
-To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false```.
+To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file.
