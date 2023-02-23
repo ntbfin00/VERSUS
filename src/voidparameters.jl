@@ -1,7 +1,17 @@
 module VoidParameters
-export MeshParams, SphericalVoidParams
+export Cosmology, MeshParams, SphericalVoidParams
 
 using Parameters
+
+@with_kw mutable struct Cosmology
+    # for redshift to distance calculation
+    h::Float64 = 0.676 # dimensionless Hubble parameter
+    omega_m::Float64 = 0.31 # omega matter
+    omega_l::Float64 = 0.69 # omega lambda
+    # for reconstruction
+    f::Float64 = 0.8  # growth rate 
+    bias::Float64 = 2.  # galaxy bias 
+end
 
 @with_kw mutable struct MeshParams
     save_mesh::Bool = true
@@ -16,9 +26,6 @@ using Parameters
     recon_alg::String = "IFFTparticle"
     los::String = "z"  # line-of-sight axis of box (disregarded if is_box=false)
     r_smooth::Float64 = box_length/nbins
-    omega_m::Float64 = 0.31
-    f::Float64 = 0.8
-    bias::Float64 = 2.
 end
 
 @with_kw mutable struct SphericalVoidParams

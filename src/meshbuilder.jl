@@ -7,6 +7,7 @@ using FITSIO
 
 np = pyimport("numpy")
 utils = pyimport("pyrecon.utils")
+cosmology = pyimport("astropy.cosmology")
 
 
 """
@@ -31,7 +32,7 @@ end
 """
 Convert sky positions and redshift to cartesian coordinates. 
 """
-function to_cartesian(positions::Array{AbstractFloat,2}; angle::String="degrees")
+function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{AbstractFloat,2}; angle::String="degrees")
     if angle == "degrees"
         degree = true
     elseif angle == "radians"
@@ -39,8 +40,13 @@ function to_cartesian(positions::Array{AbstractFloat,2}; angle::String="degrees"
     else
         throw(ErrorException("Angle type must be either 'degrees' or 'radians'."))
     end
+
+    # compute distances from redshifts
+    c = cosmology.LambdaCDM(H0=cosmo.h*100, Om0=cosmo.omega_m, Ode0=cosmo.omega_l)
+    pos = np.array(pos)
+    dist = c.comoving_distance(pos[:,3])
     
-    utils.sky_to_cartesian(positions[:,3],positions[:,1],positions[:,2], degree=degree)
+    utils.sky_to_cartesian(dist,pos[:,1],pos[:,2], degree=degree)
 end
 
 
