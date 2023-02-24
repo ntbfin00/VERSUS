@@ -124,6 +124,7 @@ if endswith(args["config"], ".yaml")
     # remove nothing values
     filter!(i -> !isnothing(i.second), config["input"])
     filter!(i -> !isnothing(i.second), config["output"])
+    filter!(i -> !isnothing(i.second), config["cosmo"])
     filter!(i -> !isnothing(i.second), config["mesh"])
     filter!(i -> !isnothing(i.second), config["spherical_voids"])
     
