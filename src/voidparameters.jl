@@ -16,16 +16,17 @@ end
 @with_kw mutable struct MeshParams
     save_mesh::Bool = true
     dtype::String = "f4"
-    nbins::Int = 512
+    nbins_vf::Int = 500
     is_box::Bool = true  # set to false for survey-like data
-    box_length::Float64 = 1.  # box length [Mpc/h] (disregarded if is_box=false)
+    box_length::Float64 = 1500.  # box length [Mpc/h] (disregarded if is_box=false)
     box_centre::Array{Float64,1} = fill(box_length/2, 3) # box centre (disregarded if is_box=false)
-    padding::Float64 = 1.2  # box padding (disregarded if is_box=true)
+    padding::Float64 = 1.2  # box padding factor (disregarded if is_box=true)
 
     # reconstruction parameters
     recon_alg::String = "IFFTparticle"
+    r_smooth::Float64 = 10. # smoothing scale [Mpc/h]
+    nbins_recon::Int = 512 
     los::String = "z"  # line-of-sight axis of box (disregarded if is_box=false)
-    r_smooth::Float64 = box_length/nbins
 end
 
 @with_kw mutable struct SphericalVoidParams

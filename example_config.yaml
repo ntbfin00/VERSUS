@@ -19,12 +19,13 @@ cosmo:
 mesh:
   save_mesh:
   dtype:
-  nbins: 
+  nbins_vf: 
   is_box:
   box_length:
   box_centre:
   padding:
   recon_alg:
+  nbins_recon:
   los:
   r_smooth:
 
