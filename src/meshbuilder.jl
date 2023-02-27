@@ -32,7 +32,7 @@ end
 """
 Convert sky positions and redshift to cartesian coordinates. 
 """
-function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{AbstractFloat,2}; angle::String="degrees")
+function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:AbstractFloat,2}; angle::String="degrees")
     if angle == "degrees"
         degree = true
     elseif angle == "radians"
