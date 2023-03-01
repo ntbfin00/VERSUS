@@ -55,6 +55,10 @@ Set algorithm for reconstruction.
 """
 function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Int)
 
+    if !mesh.is_box && size(cat.rand_pos,1) == 0
+        throw(ErrorException("is_box is set to false but no randoms have been supplied."))
+    end
+
     # determine box size from input
     if mesh.is_box
         los = mesh.los
@@ -75,9 +79,16 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
     if nbins == mesh.nbins_vf
         boxpad = 1.
     end
+    
+    recon = pyimport("pyrecon.iterative_fft_particle")
+
+    # calculate number of reconstruction bins based on boxsize and smoothing radius
+    if nbins == 0
+        rec = recon.IterativeFFTParticleReconstruction(nmesh=nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos)
+        nbins = ceil(Int64, 100*sqrt(rec.boxsize[1])/mesh.r_smooth)
+    end
 
     if mesh.recon_alg == "IFFTparticle"
-        recon = pyimport("pyrecon.iterative_fft_particle")
         rec = recon.IterativeFFTParticleReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = "data"
     elseif mesh.recon_alg == "IFFT"
@@ -92,6 +103,8 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
         throw(ErrorException("Reconstruction algorithm not recognised. Allowed algorithms are IFFTparticle, IFFT and MultiGrid."))
     end
 
+
+    println("Mesh settings: box_length=", rec.boxsize[1], ", nbins=", rec.nmesh[1], "^3")
     return rec, data
 
 end
@@ -103,17 +116,13 @@ Run reconstruction on galaxy positions. Returns a GalaxyCatalogue object.
 function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     println("\n ==== Density field reconstruction ==== ")
 
-    if !mesh.is_box && size(cat.rand_pos,1) == 0
-        throw(ErrorException("is_box is set to false but no randoms have been supplied."))
-    end
-
     if !mesh.is_box && mesh.padding <= 1.0
         @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
     end
 
     rec, data = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon)
 
-    if rec.boxsize[1]/mesh.nbins_recon > mesh.r_smooth
+    if rec.boxsize[1]/rec.nmesh[1] > mesh.r_smooth
         @warn "Smoothing scale is less than cellsize."
     end
 
@@ -144,10 +153,6 @@ Create density mesh from galaxy and random positions. Returns 3D density mesh, b
 """
 function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     println("\n ==== Creating density mesh ==== ")
-
-    if !mesh.is_box && size(cat.rand_pos,1) == 0
-        throw(ErrorException("is_box is set to false but no randoms have been supplied."))
-    end
 
     cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
     rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf)[1]
@@ -187,7 +192,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         if !isdir("mesh/")
             mkdir("mesh/")
         end 
-        fn = "mesh/mesh_" * string(mesh.nbins_vf) * "_" * mesh.dtype * ".fits"
+        fn = "mesh/" * mesh.mesh_fn * ".fits"
         f = FITS(fn, "w")
         write(f, delta)
         close(f)

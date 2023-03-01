@@ -24,12 +24,13 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
             f = FITS(fn, "r")
             N = read_header(f[2])["NAXIS2"]
             pos = Array{AbstractFloat}(undef,N,3)
-            for (i,cols) in enumerate(data_cols)
+            wts = Array{AbstractFloat}(undef,N)
+            for (i,col) in enumerate(data_cols)
                 if i<4
-                    pos[:,i] = read(f[2], cols)
+                    pos[:,i] = read(f[2], col)
                 else
                     wts_supplied = 1
-                    wts = read(f[2], cols)
+                    wts = read(f[2], col)
                 end
             end
             close(f)
@@ -50,6 +51,7 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
         if wts_supplied == 0 
             return pos, Array{AbstractFloat}(undef,0)
         else
+            println("Weights supplied.")
             return pos, wts
         end
 
@@ -72,13 +74,13 @@ end
 """
 Save void catalogue to file in FITS or txt format.
 """
-function save_void_cat(output_folder::String, output_type::String, fn::String, void_cat::Main.SphericalVoids.VoidData)
+function save_void_cat(fn::String, output_type::String, void_cat::Main.SphericalVoids.VoidData)
     # create output folder
-    if !isdir(output_folder)
-        mkdir(output_folder)
+    if !isdir("output/")
+        mkdir("output/")
     end 
 
-    out_file = output_folder * fn
+    out_file = "output/" * fn
     println("\nWriting void catalogue to file...")
     if output_type == "fits"
         data = Dict("positions" => void_cat.positions, "radii" => void_cat.radii)
@@ -96,7 +98,7 @@ function save_void_cat(output_folder::String, output_type::String, fn::String, v
     else
         throw(ErrorException("Output file format not recognised. Allowed formats are .fits and .txt"))
     end
-    println("Void catalogue written to " * output_folder)
+    println("Void catalogue written to " * out_file)
 end
 
 
@@ -133,8 +135,8 @@ if endswith(args["config"], ".yaml")
     build_mesh = get(config["input"], "build_mesh", true)
     do_recon = get(config["input"], "do_recon", false)
     run_spherical_vf = get(config["input"], "run_spherical_vf", true)
+    output_fn = get(config["output"], "output_fn", "void_cat")
     output_type = get(config["output"], "output_type", "fits")
-    output_folder = get(config["output"], "output_folder", "output/")
 
     if any(keys(config) .== "cosmo")
         cosmology = Dict()
@@ -163,7 +165,7 @@ end
 if build_mesh
     println("\nReading galaxy position data...")
     gal_data = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
-    if args["randoms"] == nothing
+    if mesh_settings.is_box
         cat = GalaxyCatalogue(gal_data...)
     else
         println("\nReading randoms position data...")
@@ -190,7 +192,7 @@ if run_spherical_vf
     else
         spherical_voids = SphericalVoids.voidfinder(mesh, mesh_settings.box_length, mesh_settings.box_centre, par_sph)
     end
-    save_void_cat(output_folder, output_type, par_sph.output_fn, spherical_voids)
+    save_void_cat(output_fn * "_spherical", output_type, spherical_voids)
 else
     throw(ErrorException("No void finder selected. Cannot proceed."))
 end
