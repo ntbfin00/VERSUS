@@ -26,28 +26,28 @@ To run from command line:
 ## Usage
 Run reconstruction on galaxy positions:
 ```
-cosmo = Cosmology(; **kwargs)
+cosmo = Cosmology(; **kwargs)  # LambdaCDM cosmology
 
 # if conversion from sky to cartesian positions required
 <xyz positions> = to_cartesian(cosmo, <rdz positions>)
 
 cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
-mesh_settings = MeshParams(; **kwargs)
+recon_par = MeshParams(; **kwargs)
 
-cat_recon = reconstruction(cosmo, cat, mesh_settings)
+cat_recon = reconstruction(cosmo, cat, recon_par)
 ```
 
 Run void finding:
 ```
 cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
-mesh_settings = MeshParams(; **kwargs)
+mesh_par = MeshParams(; **kwargs)
 
 # e.g. Spherical voidfinder
-par = SphericalVoidParams(; **kwargs)
-vf = SphericalVoids.voidfinder(cat, mesh_settings, par)
+vf_par = SphericalVoidParams(; **kwargs)
+vf = SphericalVoids.voidfinder(cat, mesh_par, vf_par)
 
 # or to supply a precomputed mesh use...
-vf = SphericalVoids.voidfinder(<3D delta array>, <side length>, <1D mesh centre array>, par)
+vf = SphericalVoids.voidfinder(<3D delta array>, <side length>, <1D mesh centre array>, vf_par)
 
 # Output:
 vf.type       # void type
