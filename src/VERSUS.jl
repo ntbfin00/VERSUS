@@ -1,7 +1,9 @@
 include("voidparameters.jl")
 include("meshbuilder.jl")
 include("sphericalvoids.jl")  # load file into global scope
+include("utils.jl")
 
+using .Utils
 using .VoidParameters
 using .MeshBuilder
 using .SphericalVoids  # load module to use struct
@@ -10,6 +12,7 @@ using FITSIO
 # using HDF5
 using YAML
 using DelimitedFiles
+
 
 """
 Read input data and randoms files in FITS. Sky positions are converted to cartesian positions.
@@ -40,9 +43,11 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
         end
 
         if data_format == "xyz"
-            println("Cartesian positions provided.")
+            @info "Input format: Cartesian"
+            # println("Input format: Cartesian.")
         elseif data_format == "rdz"
-            println("Converting sky positions to cartesian...")
+            @info "Input format: Sky, converting to cartesian..."
+            # println("Input format: Sky, converting to cartesian...")
             pos = to_cartesian(cosmo, pos)
         else
             throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
@@ -51,7 +56,8 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
         if wts_supplied == 0 
             return pos, Array{AbstractFloat}(undef,0)
         else
-            println("Weights supplied.")
+            @info "Weights supplied"
+            # println("Weights supplied.")
             return pos, wts
         end
 
@@ -81,7 +87,8 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
     end 
 
     out_file = "output/" * fn
-    println("\nWriting void catalogue to file...")
+    @info "Writing void catalogue to file"
+    # println("\nWriting void catalogue to file...")
     if output_type == "fits"
         data = Dict("positions" => void_cat.positions, "radii" => void_cat.radii)
         f = FITS(out_file * ".fits", "w")
@@ -98,7 +105,8 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
     else
         throw(ErrorException("Output file format not recognised. Allowed formats are .fits and .txt"))
     end
-    println("Void catalogue written to " * out_file)
+    @info "Void catalogue written to $out_file"
+    # println("Void catalogue written to " * out_file)
 end
 
 
@@ -118,6 +126,9 @@ s = ArgParseSettings()
 end
 
 args = parse_args(ARGS, s)
+
+# setup logging
+logger = setup_logging()
 
 # load settings
 if endswith(args["config"], ".yaml")
@@ -163,17 +174,20 @@ end
 
 # read input data
 if build_mesh
-    println("\nReading galaxy position data...")
+    @info "Reading galaxy position data"
+    # println("\nReading galaxy position data...")
     gal_data = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
     if mesh_settings.is_box
         cat = GalaxyCatalogue(gal_data...)
     else
-        println("\nReading randoms position data...")
+        @info "Reading randoms position data"
+        # println("\nReading randoms position data...")
         rand_data = read_input(build_mesh, data_format, data_cols, args["randoms"], cosmo)
         cat = GalaxyCatalogue(gal_data..., rand_data...)
     end
 else
-    println("Reading density mesh...")
+    @info "Reading density mesh"
+    # println("Reading density mesh...")
     mesh = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
 end
 
@@ -185,7 +199,7 @@ end
 
 if run_spherical_vf
     # list input parameters
-    SphericalVoids.get_params(par_sph)
+    # SphericalVoids.get_params(par_sph)
     # run voidfinder 
     if build_mesh
         spherical_voids = SphericalVoids.voidfinder(cat, mesh_settings, par_sph)
