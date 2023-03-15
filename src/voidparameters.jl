@@ -15,7 +15,7 @@ end
 
 @with_kw mutable struct MeshParams
     dtype::String = "f4"
-    nbins_vf::Int = 500  # number of bins for voidfinding
+    nbins_vf::Int = 0  # number of bins for voidfinding (calculated using galaxy density if 0)
     is_box::Bool = true  # set to false for survey-like data
     box_length::Float64 = 1500.  # box length [Mpc/h] (disregarded if is_box=false)
     box_centre::Array{Float64,1} = fill(box_length/2, 3) # box centre (disregarded if is_box=false)
@@ -25,14 +25,14 @@ end
 
     # reconstruction parameters
     recon_alg::String = "IFFTparticle"
-    r_smooth::Float64 = 12. # smoothing scale [Mpc/h]
-    nbins_recon::Int = 0  # number of bins for reconstruction (calculated using mesh parameters if set to 0)
+    r_smooth::Float64 = 10. # smoothing scale [Mpc/h]
+    nbins_recon::Int = 0  # number of bins for reconstruction (calculated using r_smooth if 0)
     los::String = "z"  # line-of-sight axis of box (disregarded if is_box=false)
 end
 
 @with_kw mutable struct SphericalVoidParams
     verbose::Bool = false
-    radii::Array{Float64,1}  # void radii [Mpc/h]
+    radii::Array{Float64,1} = [0]  # void radii [Mpc/h] (calculated using galaxy density if 0)
     min_dens_cut::Float64 = 1.0
     max_overlap_frac::Float64 = 0.
 end
