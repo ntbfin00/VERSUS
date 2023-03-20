@@ -61,7 +61,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
 
                 kR = prefact * sqrt(kx2 + ky2 + kz2)
                 if abs(kR)>1e-5
-                    delta_k[i,j,k] = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
+                    delta_k[i,j,k] *= 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
                 end
 
             end
@@ -111,7 +111,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Int64,middle::Int64,R::
 
                 kR = prefact * sqrt(kx2 + ky2 + kz2)
                 if abs(kR)>1e-5
-                    delta_k[i,j,k] = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
+                    delta_k[i,j,k] *= 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
                 end
 
             end
@@ -567,6 +567,9 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::AbstractFloat, 
         else
             fft_plan, delta_sm = smoothing(delta, dims, middle, R, box_length, fft_plan, threading)
         end
+
+        println(delta_sm)
+        println(minimum(delta_sm))
 
         # check if cells are below threshold
         if minimum(delta_sm)>threshold
