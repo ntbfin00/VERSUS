@@ -181,7 +181,7 @@ end
 """
 Identify if void candidate is a new void or belongs to a previously detected void by computing distances to detected voids.
 
-Returns 0 if new void, else another void has been detected nearby.
+Returns 1 if another void has been detected nearby.
 """
 function nearby_voids1(voids_total::Int32,dims::Int64,middle::Int64,i::Int64,j::Int64,k::Int64,void_radius::Array{Float64,1},void_pos::Array{Int64,2},R_grid::Float64,max_overlap_frac::Float64)
 
@@ -190,32 +190,20 @@ function nearby_voids1(voids_total::Int32,dims::Int64,middle::Int64,i::Int64,j::
 
     # loop over all previously detected voids
     for l = 1:voids_total
-        if nearby_voids>0 
-            break
-        end
 
         dx = i - void_pos[l,1]
-        if dx>middle
-            dx -= dims
-        end
-        if dx<-middle
-            dx += dims
+        if abs(dx) > middle
+            dx = abs(dx) - dims
         end
 
         dy = j - void_pos[l,2]
-        if dy>middle
-            dy -= dims
-        end
-        if dy<-middle
-            dy += dims
+        if abs(dy) > middle
+            dy = abs(dy) - dims
         end
 
         dz = k - void_pos[l,3]
-        if dz>middle
-            dz -= dims
-        end
-        if dz<-middle
-            dz += dims
+        if abs(dz) > middle
+            dz = abs(dz) - dims 
         end
 
         # determine distance of void from candidate
@@ -225,13 +213,16 @@ function nearby_voids1(voids_total::Int32,dims::Int64,middle::Int64,i::Int64,j::
         if dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid))
 
             if max_overlap_frac == 0
-                nearby_voids += 1
+                nearby_voids = 1
+                break
             else
                 overlap_frac += void_overlap_frac(R_grid,void_radius[l],dist2)
 
                 if overlap_frac > max_overlap_frac
-                    nearby_voids += 1
+                    nearby_voids = 1
+                    break
                 end
+
             end
         end
     end
@@ -253,39 +244,13 @@ function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_gr
 
     # loop over all cells in cubic box around void
     for l = -Ncells:Ncells
-
-        # skip thread once a nearby void has been detected
-        if nearby_voids>0 
-            continue
-        end
-
-        i1 = i+l
-        if i1>dims
-            i1 -= dims
-        end
-        if i1<1
-            i1 += dims
-        end
+        i1 = mod1(i+l, dims)
 
         for m = -Ncells:Ncells  
-
-            j1 = j+m
-            if j1>dims
-                j1 -= dims
-            end
-            if j1<1
-                j1 += dims
-            end
+            j1 = mod1(j+m, dims)
 
             for n = -Ncells:Ncells        
-
-                k1 = k+n
-                if k1>dims
-                    k1 -= dims
-                end
-                if k1<1
-                    k1 += dims
-                end
+                k1 = mod1(k+n, dims)
 
                 # skip if cell does not belong to another void
                 if in_void[i1,j1,k1] == 0
@@ -296,16 +261,18 @@ function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_gr
                     if dist2<R_grid2
 
                         if max_overlap_frac == 0
-                            nearby_voids += 1
+                            nearby_voids = 1
+                            break
                         else
                             overlap += 1
                             if overlap*inv_void_cells > max_overlap_frac
-                                nearby_voids += 1
+                                nearby_voids = 1
+                                break
                             end
                         end
+
                     end
                 end
-
 
             end
         end
@@ -334,33 +301,13 @@ function nearby_voids2(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,R_gr
             continue
         end
 
-        i1 = i+l
-        if i1>dims
-            i1 -= dims
-        end
-        if i1<1
-            i1 += dims
-        end
+        i1 = mod1(i+l, dims)
 
         for m = -Ncells:Ncells  
-
-            j1 = j+m
-            if j1>dims
-                j1 -= dims
-            end
-            if j1<1
-                j1 += dims
-            end
+            j1 = mod1(j+m, dims)
 
             for n = -Ncells:Ncells        
-
-                k1 = k+n
-                if k1>dims
-                    k1 -= dims
-                end
-                if k1<1
-                    k1 += dims
-                end
+                k1 = mod1(k+n, dims)
 
                 # skip if cell does not belong to another void
                 if in_void[i1,j1,k1] == 0
@@ -397,34 +344,13 @@ function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,
 
     # loop over all cells in cubic box around void
     for l = -Ncells:Ncells  
-
-        i1 = i+l
-        if i1>dims
-            i1 -= dims
-        end
-        if i1<1
-            i1 += dims
-        end
+        i1 = mod1(i+l, dims)
 
         for m = -Ncells:Ncells  
-
-            j1 = j+m
-            if j1>dims
-                j1 -= dims
-            end
-            if j1<1
-                j1 += dims
-            end
+            j1 = mod1(j+m, dims)
 
             for n = -Ncells:Ncells        
-
-                k1 = k+n
-                if k1>dims
-                    k1 -= dims
-                end
-                if k1<1
-                    k1 += dims
-                end
+                k1 = mod1(k+n, dims)
 
                 dist2 = l*l + m*m + n*n
                 if dist2<R_grid2
@@ -446,34 +372,13 @@ function mark_void_region!(Ncells::Int64,dims::Int64,i::Int64,j::Int64,k::Int64,
 
     # loop over all cells in cubic box around void
     Threads.@threads for l = -Ncells:Ncells  
-
-        i1 = i+l
-        if i1>dims
-            i1 -= dims
-        end
-        if i1<1
-            i1 += dims
-        end
+        i1 = mod1(i+l, dims)
 
         for m = -Ncells:Ncells  
-
-            j1 = j+m
-            if j1>dims
-                j1 -= dims
-            end
-            if j1<1
-                j1 += dims
-            end
+            j1 = mod1(j+m, dims)
 
             for n = -Ncells:Ncells        
-
-                k1 = k+n
-                if k1>dims
-                    k1 -= dims
-                end
-                if k1<1
-                    k1 += dims
-                end
+                k1 = mod1(k+n, dims)
 
                 dist2 = l*l + m*m + n*n
                 if dist2<R_grid2
@@ -568,9 +473,6 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::AbstractFloat, 
             fft_plan, delta_sm = smoothing(delta, dims, middle, R, box_length, fft_plan, threading)
         end
 
-        println(delta_sm)
-        println(minimum(delta_sm))
-
         # check if cells are below threshold
         if minimum(delta_sm)>threshold
             @info "No cells with delta < $threshold"
@@ -583,7 +485,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::AbstractFloat, 
 
         R_grid = R/res
         R_grid2 = R_grid*R_grid
-        Ncells = floor(Int64,R_grid + 1)
+        Ncells = floor(Int64, R_grid + 1)
 
         if voids_total<(2*Ncells+1)^3
             mode = 0

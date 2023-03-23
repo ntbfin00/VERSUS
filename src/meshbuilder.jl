@@ -31,13 +31,15 @@ mutable struct GalaxyCatalogue
     end
 end
 
+"""
+Calculate the mean separation between galaxies in the catalogue.
+"""
 function mean_gal_sep(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
         # estimate volume of survey
         if mesh.is_box
             vol = mesh.box_length^3 
         else
-            l = maximum(cat.rand_pos,dims=1) - minimum(cat.rand_pos,dims=1)
-            vol = prod(l)
+            # TO DO
         end
 
         # estimate mean galaxy density (underestimate in case of survey)
@@ -82,14 +84,57 @@ Round = "below" finds optimal nbins < input nbins.
 function optimal_binning(nbins, round::String)
     @debug "Determining the optimal number of bins"
 
-    p = floor(log(2,nbins))
-    q = floor(log(3,(nbins - 2^p)))
+    # round up
     if round == "above"
-        r = ceil(log(5,(nbins - 2^p - 3^q)))
-        return Int(2^p + 3^q + 5^r)
+        # smallest p where 2^p > nbins
+        max_p = ceil(log(2,nbins))
+        best_n = 2^max_p
+        best_diff = best_n - nbins
+        # loop through possible p values
+        # if 3*2^p, 5*2^p or 7*2^p are closer to nbins then use this instead
+        for p = 3:max_p
+            n_try = [3,5,7] .* 2^p
+            diff = n_try .- nbins
+            pos_cut = diff .>= 0
+            # if all trial nbins < input nbins then skip this p value
+            if iszero(pos_cut)
+                continue
+            end
+            diff_pos = diff[pos_cut]
+            min_diff, indx = findmin(diff_pos)
+            # set new best estimate if trial nbins is closer than input
+            if min_diff < best_diff
+                best_diff = min_diff
+                best_n = n_try[pos_cut][indx]
+            end
+        end
+    # round down
     else
-        return Int(2^p + 3^q)
+        # largest p where 2^p < nbins
+        max_p = floor(log(2,nbins))
+        best_n = 2^max_p
+        best_diff = nbins - best_n
+        # loop through possible p values
+        # if 3*2^p, 5*2^p or 7*2^p are closer to nbins then use this instead
+        for p = 3:max_p
+            n_try = [3,5,7] .* 2^p
+            diff = nbins .- n_try
+            pos_cut = diff .>= 0
+            # if all trial nbins > input nbins then skip this p value
+            if iszero(pos_cut)
+                continue
+            end
+            diff_pos = diff[pos_cut]
+            min_diff, indx = findmin(diff_pos)
+            # set new best estimate if trial nbins is closer than input
+            if min_diff < best_diff
+                best_diff = min_diff
+                best_n = n_try[pos_cut][indx]
+            end
+        end
     end
+
+    Int(best_n)
 
 end
 
