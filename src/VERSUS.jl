@@ -15,7 +15,7 @@ using DelimitedFiles
 
 
 """
-Read input data and randoms files in FITS. Sky positions are converted to cartesian positions.
+Read input data and randoms FITS files. Sky positions are converted to cartesian positions.
 """
 function read_input(build_mesh::Bool, data_format::String, data_cols::Array{String,1}, fn::String, cosmo::Main.VoidParameters.Cosmology)
     # hdf5_ext = [".hdf", ".h4", ".hdf4", ".he2", ".h5", ".hdf5", ".he5", ".h5py"]                                                          
@@ -46,7 +46,7 @@ function read_input(build_mesh::Bool, data_format::String, data_cols::Array{Stri
             @info "Input format: Cartesian"
             # println("Input format: Cartesian.")
         elseif data_format == "rdz"
-            @info "Input format: Sky, converting to cartesian..."
+            @info "Input format: Sky"
             # println("Input format: Sky, converting to cartesian...")
             pos = to_cartesian(cosmo, pos)
         else
