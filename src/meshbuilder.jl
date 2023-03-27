@@ -35,15 +35,43 @@ end
 Calculate the mean separation between galaxies in the catalogue.
 """
 function mean_gal_sep(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
-        # estimate volume of survey
+        @info "Determining mean galaxy separation"
+
         if mesh.is_box
+            # calculate the volume of box
             vol = mesh.box_length^3 
+            # calculate mean galaxy density
+            mean_dens = size(cat.gal_pos,1)/vol
         else
-            # TO DO
+            # calculate volume of cuboid flush with survey region
+            l = maximum(cat.rand_pos,dims=1) - minimum(cat.rand_pos,dims=1)
+            centre = (maximum(cat.rand_pos,dims=1) + minimum(cat.rand_pos,dims=1))./2
+            vol_est = prod(l)
+
+            @debug "Initial galaxy density estimate in cuboid"
+            # estimate density of galaxies in cuboid (underestimate)
+            mean_dens_est = size(cat.gal_pos,1)/vol_est
+            # estimate galaxy separation (overestimate)
+            r_sep_est = (4 * pi * mean_dens_est / 3)^(-1/3)
+            # estimate nbins (underestimate)
+            nbins_est = l./r_sep_est
+            cell_vol = prod(l./nbins_est)
+
+            @debug "Assigning randoms to estimate volume"
+            # place randoms on mesh
+            rec = recon.BaseReconstruction(nmesh=nbins_est, boxsize=l, boxcenter=centre, boxpad=1)
+            rec.assign_randoms(cat.rand_pos, rand_wts)
+
+            @debug "Counting filled cells"
+            # find where randoms are greater than 0.01 * average randoms per cell
+            threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(nbins_est)
+            filled_cells = count(i->(i > threshold), rec.mesh_randoms.value)
+
+            @debug "Estimating more accurate mean density"
+            # estimate mean galaxy density
+            mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
         end
 
-        # estimate mean galaxy density (underestimate in case of survey)
-        mean_dens = size(cat.gal_pos,1)/vol
 
         (4 * pi * mean_dens / 3)^(-1/3)
 end
@@ -189,7 +217,6 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
     # display only when nbins is set
     if nbins != 0
         @info "Mesh settings: box_length=$(rec.boxsize[1]), nbins=$(rec.nmesh[1])^3"
-        # println("Mesh settings: box_length=", rec.boxsize[1], ", nbins=", rec.nmesh[1], "^3")
     end
 
     return rec, data
@@ -197,13 +224,38 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
 end
 
 
+function compute_density_field(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, rec, r_smooth::Float64)
+
+    @info "Assigning galaxies to grid"
+    gal_pos = np.array(cat.gal_pos)
+    if size(cat.gal_wts,1) == 0
+        rec.assign_data(gal_pos)
+    else
+        gal_wts = np.array(cat.gal_wts)
+        rec.assign_data(gal_pos, gal_wts)
+    end
+
+    if !mesh.is_box
+        @info "Assigning randoms to grid"
+        rand_pos = np.array(cat.rand_pos)
+        if size(cat.rand_wts) == 0
+            rec.assign_randoms(rand_pos)
+        else
+            rand_wts = np.array(cat.rand_wts)
+            rec.assign_randoms(rand_pos, rand_wts)
+        end
+    end
+
+    @info "Computing density field"
+    rec.set_density_contrast(smoothing_radius=r_smooth)
+end
+
 """
 Run reconstruction on galaxy positions. Returns a GalaxyCatalogue object.
 """
 function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     
     @info "Performing density field reconstruction"
-    # println("\n ==== Density field reconstruction ==== ")
 
     if !mesh.is_box && mesh.padding <= 1.0
         @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
@@ -226,27 +278,13 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuil
         @warn "Smoothing scale is less than cellsize."
     end
 
-    # assign data and compute the density field
-    @info "Assigning galaxies to grid"
-    # println("Assigning galaxies to grid...")
-    gal_pos = np.array(cat.gal_pos)
-    if size(cat.gal_wts,1) == 0
-        rec.assign_data(gal_pos)
-    else
-        gal_wts = np.array(cat.gal_wts)
-        rec.assign_data(gal_pos, gal_wts)
-    end
-
-    @info "Computing density field"
-    rec.set_density_contrast(smoothing_radius=mesh.r_smooth)
+    compute_density_field(cat, mesh, rec, mesh.r_smooth)
 
     # run reconstruction
-    @info "Running reconstruction with $mesh.recon_alg"
-    # println("Running reconstruction with ", mesh.recon_alg, "...")
+    @info "Running reconstruction with $(mesh.recon_alg)"
     rec.run()
     rec_gal_pos = rec.read_shifted_positions(data, field="rsd")
     @info "Galaxy positions reconstructed"
-    # println("Galaxy positions reconstructed.")
     
     # output reconstructed catalogue
     GalaxyCatalogue(rec_gal_pos, cat.gal_wts, cat.rand_pos, cat.rand_wts)
@@ -259,7 +297,6 @@ Create density mesh from galaxy and random positions. Returns 3D density mesh, b
 function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
 
     @info "Creating density mesh"
-    # println("\n ==== Creating density mesh ==== ")
 
     # set bias=1 so voids are found in the galaxy field
     # other cosmological parameters are have no effect on mesh construction 
@@ -278,42 +315,10 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         rec = set_recon_engine(cosmo_vf, cat, mesh, nbins)[1]
     end
 
-    # assign data and compute the density field
-    @info "Assigning galaxies to grid"
-    # println("Assigning galaxies to grid...")
-    gal_pos = np.array(cat.gal_pos)
-    if size(cat.gal_wts,1) == 0
-        rec.assign_data(gal_pos)
-    else
-        gal_wts = np.array(cat.gal_wts)
-        rec.assign_data(gal_pos, gal_wts)
-    end
+    compute_density_field(cat, mesh, rec, mesh.r_smooth)
 
-    if mesh.is_box
-        @info "Computing density field"
-        rec.set_density_contrast(smoothing_radius=0.0)
-
-        delta = rec.mesh_delta.value
-        @info "$(string(typeof(delta))[7:13]) density mesh set"
-        # println(string(typeof(delta))[7:13]," density mesh set.")
-
-    else
-        @info "Assigning randoms to grid"
-        # println("Assigning randoms to grid...")
-        rand_pos = np.array(cat.rand_pos)
-        if size(cat.rand_wts) == 0
-            rec.assign_randoms(rand_pos)
-        else
-            rand_wts = np.array(cat.rand_wts)
-            rec.assign_randoms(rand_pos, rand_wts)
-        end
-        @info "Computing density field"
-        rec.set_density_contrast(smoothing_radius=0.0)
-
-        delta = rec.mesh_delta.value
-        @info "$(string(typeof(delta))[7:13]) density mesh set"
-        # println(string(typeof(delta))[7:13]," density mesh set.")
-    end
+    delta = rec.mesh_delta.value
+    @info "$(string(typeof(delta))[7:13]) density mesh set"
 
     # save mesh output
     if mesh.save_mesh
@@ -325,7 +330,6 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         write(f, delta)
         close(f)
         @info "$fn saved to file"
-        # println(fn * " saved to file.")
     end
         
     return delta, rec.boxsize[1], rec.boxcenter
