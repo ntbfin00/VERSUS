@@ -1,6 +1,6 @@
 module MeshBuilder
 
-export GalaxyCatalogue, mean_gal_sep, to_cartesian, reconstruction, create_mesh
+export GalaxyCatalogue, gal_dens_bin, to_cartesian, reconstruction, create_mesh
 
 include("utils.jl")
 
@@ -11,70 +11,6 @@ using FITSIO
 np = pyimport("numpy")
 utils = pyimport("pyrecon.utils")
 cosmology = pyimport("astropy.cosmology")
-
-
-"""
-GalaxyCatalogue.gal_pos - galaxy positions (x,y,z)
-GalaxyCatalogue.gal_wts - galaxy weights
-GalaxyCatalogue.rand_pos - random positions (x,y,z)
-GalaxyCatalogue.rand_wts - random weights
-
-Weights and randoms set to size 0 matrix when not specified.
-"""
-mutable struct GalaxyCatalogue
-    gal_pos::Array{AbstractFloat,2}
-    gal_wts::Array{AbstractFloat,1}
-    rand_pos::Array{AbstractFloat,2}
-    rand_wts::Array{AbstractFloat,1}
-    function GalaxyCatalogue(gal_pos,gal_wts=Array{AbstractFloat}(undef,0),rand_pos=Array{AbstractFloat}(undef,0,0),rand_wts=Array{AbstractFloat}(undef,0))
-        new(gal_pos,gal_wts,rand_pos,rand_wts)
-    end
-end
-
-"""
-Calculate the mean separation between galaxies in the catalogue.
-"""
-function mean_gal_sep(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
-        @info "Determining mean galaxy separation"
-
-        if mesh.is_box
-            # calculate the volume of box
-            vol = mesh.box_length^3 
-            # calculate mean galaxy density
-            mean_dens = size(cat.gal_pos,1)/vol
-        else
-            # calculate volume of cuboid flush with survey region
-            l = maximum(cat.rand_pos,dims=1) - minimum(cat.rand_pos,dims=1)
-            centre = (maximum(cat.rand_pos,dims=1) + minimum(cat.rand_pos,dims=1))./2
-            vol_est = prod(l)
-
-            @debug "Initial galaxy density estimate in cuboid"
-            # estimate density of galaxies in cuboid (underestimate)
-            mean_dens_est = size(cat.gal_pos,1)/vol_est
-            # estimate galaxy separation (overestimate)
-            r_sep_est = (4 * pi * mean_dens_est / 3)^(-1/3)
-            # estimate nbins (underestimate)
-            nbins_est = l./r_sep_est
-            cell_vol = prod(l./nbins_est)
-
-            @debug "Assigning randoms to estimate volume"
-            # place randoms on mesh
-            rec = recon.BaseReconstruction(nmesh=nbins_est, boxsize=l, boxcenter=centre, boxpad=1)
-            rec.assign_randoms(cat.rand_pos, rand_wts)
-
-            @debug "Counting filled cells"
-            # find where randoms are greater than 0.01 * average randoms per cell
-            threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(nbins_est)
-            filled_cells = count(i->(i > threshold), rec.mesh_randoms.value)
-
-            @debug "Estimating more accurate mean density"
-            # estimate mean galaxy density
-            mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
-        end
-
-
-        (4 * pi * mean_dens / 3)^(-1/3)
-end
 
 """
 Convert sky positions and redshift to cartesian coordinates. 
@@ -104,73 +40,122 @@ function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:Abstrac
 end
 
 """
-Returns the optimal number of bins for FFTs closest to the input nbins.
-
-Round = "above" finds optimal nbins > input nbins.
-Round = "below" finds optimal nbins < input nbins.
+Returns the optimal number of bins for FFTWs above the input value.
 """
-function optimal_binning(nbins, round::String)
+function optimal_binning(nbins::Array{Int,1})
     @debug "Determining the optimal number of bins"
 
-    # round up
-    if round == "above"
-        # smallest p where 2^p > nbins
-        max_p = ceil(log(2,nbins))
+    n_opt = zeros(3)
+    for (i,n) in enumerate(nbins)
+        # largest p where 2^p <= n
+        max_p = ndigits(n, base=2)
         best_n = 2^max_p
-        best_diff = best_n - nbins
-        # loop through possible p values
-        # if 3*2^p, 5*2^p or 7*2^p are closer to nbins then use this instead
-        for p = 3:max_p
-            n_try = [3,5,7] .* 2^p
-            diff = n_try .- nbins
-            pos_cut = diff .>= 0
-            # if all trial nbins < input nbins then skip this p value
-            if iszero(pos_cut)
-                continue
-            end
-            diff_pos = diff[pos_cut]
-            min_diff, indx = findmin(diff_pos)
-            # set new best estimate if trial nbins is closer than input
-            if min_diff < best_diff
-                best_diff = min_diff
-                best_n = n_try[pos_cut][indx]
-            end
-        end
-    # round down
-    else
-        # largest p where 2^p < nbins
-        max_p = floor(log(2,nbins))
-        best_n = 2^max_p
-        best_diff = nbins - best_n
-        # loop through possible p values
-        # if 3*2^p, 5*2^p or 7*2^p are closer to nbins then use this instead
-        for p = 3:max_p
-            n_try = [3,5,7] .* 2^p
-            diff = nbins .- n_try
-            pos_cut = diff .>= 0
-            # if all trial nbins > input nbins then skip this p value
-            if iszero(pos_cut)
-                continue
-            end
-            diff_pos = diff[pos_cut]
-            min_diff, indx = findmin(diff_pos)
-            # set new best estimate if trial nbins is closer than input
-            if min_diff < best_diff
-                best_diff = min_diff
-                best_n = n_try[pos_cut][indx]
-            end
-        end
+        best_diff = best_n - n
+        n_try = [2^max_p, 2^(max_p - 1), 3*2^(max_p - 2), 5*(max_p - 3), 7*(max_p - 3)] 
+        diff = n_try .- n
+        # find n which gives minimum positive difference
+        n_opt[i] = minimum(diff[diff .>=0]) + n
     end
 
-    Int(best_n)
+    Int.(n_opt)
 
 end
 
+"""
+Return both the optimal number of bins based on the galaxy density and the galaxy separation.
+"""
+function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
+        @info "Calculating default bins based on galaxy density"
+
+        if mesh.is_box
+            # calculate the volume of box
+            vol = mesh.box_length^3 
+            # calculate mean galaxy density
+            mean_dens = size(cat.gal_pos,1)/vol
+            r_sep = (4 * pi * mean_dens / 3)^(-1/3)
+            return optimal_binning(nbins_est), r_sep
+        else
+            n_itr = 4
+            cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
+            rec = set_recon_engine(cosmo_vf, cat, mesh, [0])[1]
+            vol = prod(rec.boxsize)
+            mean_dens = size(cat.gal_pos,1)/vol
+            rand_pos = np.array(cat.rand_pos)
+            rand_wts = np.array(cat.rand_wts)
+            # iterate for more accurate estimation
+            for i = 1:n_itr
+                # estimate galaxy separation (overestimate)
+                r_sep_est = (4 * pi * mean_dens / 3)^(-1/3)
+                # estimate nbins (underestimate)
+                nbins_est = ceil.(Int, rec.boxsize./r_sep_est)
+                @debug "Iteration $i, estimated nbins: $nbins_est"
+                if i == n_itr
+                    # return optimal_binning(nbins_est), r_sep_est
+                    return nbins_est, r_sep_est
+                end
+                nbins_tot = prod(nbins_est)
+                cell_vol = vol/nbins_tot
+
+                @debug "Assigning randoms to estimate volume"
+                # place randoms on mesh
+                rec = set_recon_engine(cosmo_vf, cat, mesh, nbins_est)[1]
+                rec.assign_randoms(rand_pos, rand_wts)
+
+                @debug "Counting filled cells"
+                # find where randoms are greater than 0.01 * average randoms per cell
+                threshold = 0.01 * sum(rec.mesh_randoms.value)/nbins_tot
+                filled_cells = count(q->(q > threshold), rec.mesh_randoms.value)
+
+                @debug "Estimating more accurate mean density" 
+                # estimate mean galaxy density
+                mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
+            end
+        end
+
+        
+        # if mesh.is_box
+            # # calculate the volume of box
+            # vol = mesh.box_length^3 
+            # # calculate mean galaxy density
+            # mean_dens = size(cat.gal_pos,1)/vol
+        # else
+            # # calculate volume of cuboid flush with survey region
+            # l = maximum(cat.rand_pos,dims=1) - minimum(cat.rand_pos,dims=1)
+            # centre = (maximum(cat.rand_pos,dims=1) + minimum(cat.rand_pos,dims=1))./2
+            # vol_est = prod(l)
+
+            # @debug "Initial galaxy density estimate in cuboid"
+            # # estimate density of galaxies in cuboid (underestimate)
+            # mean_dens_est = size(cat.gal_pos,1)/vol_est
+            # # estimate galaxy separation (overestimate)
+            # r_sep_est = (4 * pi * mean_dens_est / 3)^(-1/3)
+            # # estimate nbins (underestimate)
+            # nbins_est = l./r_sep_est
+            # cell_vol = prod(l./nbins_est)
+
+            # @debug "Assigning randoms to estimate volume"
+            # # place randoms on mesh
+            # rec = recon.BaseReconstruction(nmesh=nbins_est, boxsize=l, boxcenter=centre, boxpad=1)
+            # rec.assign_randoms(cat.rand_pos, rand_wts)
+
+            # @debug "Counting filled cells"
+            # # find where randoms are greater than 0.01 * average randoms per cell
+            # threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(nbins_est)
+            # filled_cells = count(i->(i > threshold), rec.mesh_randoms.value)
+
+            # @debug "Estimating more accurate mean density"
+            # # estimate mean galaxy density
+            # mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
+        # end
+
+
+        # (4 * pi * mean_dens / 3)^(-1/3)
+end
 
 """
-Set algorithm for reconstruction.
+Initialise mesh and set algorithm for reconstruction.
 """
-function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Int)
+function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1})
     @debug "Initialising mesh"
 
     if !mesh.is_box && size(cat.rand_pos,1) == 0
@@ -215,8 +200,8 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
 
 
     # display only when nbins is set
-    if nbins != 0
-        @info "Mesh settings: box_length=$(rec.boxsize[1]), nbins=$(rec.nmesh[1])^3"
+    if nbins != [0]
+        @info "Mesh settings: box_length=$(rec.boxsize), nbins=$(rec.nmesh)"
     end
 
     return rec, data
@@ -224,26 +209,18 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBu
 end
 
 
-function compute_density_field(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, rec, r_smooth::Float64)
+function compute_density_field(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, rec, r_smooth::Float64)
 
     @info "Assigning galaxies to grid"
     gal_pos = np.array(cat.gal_pos)
-    if size(cat.gal_wts,1) == 0
-        rec.assign_data(gal_pos)
-    else
-        gal_wts = np.array(cat.gal_wts)
-        rec.assign_data(gal_pos, gal_wts)
-    end
+    gal_wts = np.array(cat.gal_wts)
+    rec.assign_data(gal_pos, gal_wts)
 
     if !mesh.is_box
         @info "Assigning randoms to grid"
         rand_pos = np.array(cat.rand_pos)
-        if size(cat.rand_wts) == 0
-            rec.assign_randoms(rand_pos)
-        else
-            rand_wts = np.array(cat.rand_wts)
-            rec.assign_randoms(rand_pos, rand_wts)
-        end
+        rand_wts = np.array(cat.rand_wts)
+        rec.assign_randoms(rand_pos, rand_wts)
     end
 
     @info "Computing density field"
@@ -253,7 +230,7 @@ end
 """
 Run reconstruction on galaxy positions. Returns a GalaxyCatalogue object.
 """
-function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
+function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
     
     @info "Performing density field reconstruction"
 
@@ -268,13 +245,13 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.MeshBuil
     if mesh.nbins_recon == 0
         @info "Calculating default bins based on smoothing radius"
         # Determine the optimum number of bins for FFTs below the smoothing radius
-        nsmooth = rec.boxsize[1]/mesh.r_smooth
-        nbins = optimal_binning(nsmooth, "below")
+        nsmooth = rec.boxsize./mesh.r_smooth
+        nbins = optimal_binning(nsmooth)
         # recalculate the mesh with new nbins
         rec, data = set_recon_engine(cosmo, cat, mesh, nbins)
     end
 
-    if rec.boxsize[1]/rec.nmesh[1] > mesh.r_smooth
+    if maximum(rec.boxsize./rec.nmesh) > mesh.r_smooth
         @warn "Smoothing scale is less than cellsize."
     end
 
@@ -294,7 +271,7 @@ end
 """
 Create density mesh from galaxy and random positions. Returns 3D density mesh, box length and box centre.
 """
-function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
+function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
 
     @info "Creating density mesh"
 
@@ -307,10 +284,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
 
     # calculate default number of voidfinding bins based on galaxy density
     if mesh.nbins_vf == 0
-        @info "Calculating default bins based on galaxy density"
-        r_sep = mean_gal_sep(cat, mesh)
-        nbins = rec.boxsize[1]/(0.5 * r_sep)
-        nbins = optimal_binning(nbins, "above")
+        nbins = gal_dens_bin(cat, mesh)[1]
         # recalculate the mesh with new nbins
         rec = set_recon_engine(cosmo_vf, cat, mesh, nbins)[1]
     end
@@ -332,7 +306,7 @@ function create_mesh(cat::Main.MeshBuilder.GalaxyCatalogue, mesh::Main.VoidParam
         @info "$fn saved to file"
     end
         
-    return delta, rec.boxsize[1], rec.boxcenter
+    return delta, rec.boxsize, rec.boxcenter
 
 end
 

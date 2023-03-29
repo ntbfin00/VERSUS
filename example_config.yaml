@@ -31,7 +31,6 @@ mesh:
   r_smooth:
 
 spherical_voids:
-  verbose:
   radii: 
   min_dens_cut:
   max_overlap_frac:
