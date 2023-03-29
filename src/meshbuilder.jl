@@ -73,7 +73,9 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
             # calculate mean galaxy density
             mean_dens = size(cat.gal_pos,1)/vol
             r_sep = (4 * pi * mean_dens / 3)^(-1/3)
-            return optimal_binning(nbins_est), r_sep
+            # return optimal_binning(nbins_est), r_sep
+            nbins = ceil(Int, mesh.box_length/r_sep)
+            return fill(nbins,3), r_sep
         else
             n_itr = 4
             cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
@@ -87,7 +89,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
                 # estimate galaxy separation (overestimate)
                 r_sep_est = (4 * pi * mean_dens / 3)^(-1/3)
                 # estimate nbins (underestimate)
-                nbins_est = ceil.(Int, rec.boxsize./r_sep_est)
+                nbins_est = ceil.(Int, rec.boxsize/r_sep_est)
                 @debug "Iteration $i, estimated nbins: $nbins_est"
                 if i == n_itr
                     # return optimal_binning(nbins_est), r_sep_est
@@ -112,44 +114,6 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
             end
         end
 
-        
-        # if mesh.is_box
-            # # calculate the volume of box
-            # vol = mesh.box_length^3 
-            # # calculate mean galaxy density
-            # mean_dens = size(cat.gal_pos,1)/vol
-        # else
-            # # calculate volume of cuboid flush with survey region
-            # l = maximum(cat.rand_pos,dims=1) - minimum(cat.rand_pos,dims=1)
-            # centre = (maximum(cat.rand_pos,dims=1) + minimum(cat.rand_pos,dims=1))./2
-            # vol_est = prod(l)
-
-            # @debug "Initial galaxy density estimate in cuboid"
-            # # estimate density of galaxies in cuboid (underestimate)
-            # mean_dens_est = size(cat.gal_pos,1)/vol_est
-            # # estimate galaxy separation (overestimate)
-            # r_sep_est = (4 * pi * mean_dens_est / 3)^(-1/3)
-            # # estimate nbins (underestimate)
-            # nbins_est = l./r_sep_est
-            # cell_vol = prod(l./nbins_est)
-
-            # @debug "Assigning randoms to estimate volume"
-            # # place randoms on mesh
-            # rec = recon.BaseReconstruction(nmesh=nbins_est, boxsize=l, boxcenter=centre, boxpad=1)
-            # rec.assign_randoms(cat.rand_pos, rand_wts)
-
-            # @debug "Counting filled cells"
-            # # find where randoms are greater than 0.01 * average randoms per cell
-            # threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(nbins_est)
-            # filled_cells = count(i->(i > threshold), rec.mesh_randoms.value)
-
-            # @debug "Estimating more accurate mean density"
-            # # estimate mean galaxy density
-            # mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
-        # end
-
-
-        # (4 * pi * mean_dens / 3)^(-1/3)
 end
 
 """
@@ -225,6 +189,7 @@ function compute_density_field(cat::Main.VoidParameters.GalaxyCatalogue, mesh::M
 
     @info "Computing density field"
     rec.set_density_contrast(smoothing_radius=r_smooth)
+
 end
 
 """
@@ -289,9 +254,11 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         rec = set_recon_engine(cosmo_vf, cat, mesh, nbins)[1]
     end
 
-    compute_density_field(cat, mesh, rec, mesh.r_smooth)
+    compute_density_field(cat, mesh, rec, 0.)
 
     delta = rec.mesh_delta.value
+    @debug "Check for NaN values in mesh " any_NaN = any(isnan, delta)
+
     @info "$(string(typeof(delta))[7:13]) density mesh set"
 
     # save mesh output
