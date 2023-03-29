@@ -13,70 +13,6 @@ using FITSIO
 using YAML
 using DelimitedFiles
 
-
-"""
-Read input data and randoms FITS files. Sky positions are converted to cartesian positions.
-"""
-function read_input(build_mesh::Bool, data_format::String, data_cols::Array{String,1}, fn::String, cosmo::Main.VoidParameters.Cosmology)
-    # hdf5_ext = [".hdf", ".h4", ".hdf4", ".he2", ".h5", ".hdf5", ".he5", ".h5py"]                                                          
-    wts_supplied = 0
-
-    # if galaxies/randoms are supplied as input
-    if build_mesh
-        if endswith(fn, ".fits")
-            f = FITS(fn, "r")
-            N = read_header(f[2])["NAXIS2"]
-            pos = Array{AbstractFloat}(undef,N,3)
-            wts = Array{AbstractFloat}(undef,N)
-            for (i,col) in enumerate(data_cols)
-                if i<4
-                    pos[:,i] = read(f[2], col)
-                else
-                    wts_supplied = 1
-                    wts = read(f[2], col)
-                end
-            end
-            close(f)
-        # elseif any(endswith.(fn, hdf5_ext))
-        else
-            throw(ErrorException("Input file format not recognised. Allowed format is .fits"))
-        end
-
-        if data_format == "xyz"
-            @info "Input format: Cartesian"
-            # println("Input format: Cartesian.")
-        elseif data_format == "rdz"
-            @info "Input format: Sky"
-            # println("Input format: Sky, converting to cartesian...")
-            pos = to_cartesian(cosmo, pos)
-        else
-            throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
-        end
-
-        if wts_supplied == 0 
-            return pos, Array{AbstractFloat}(undef,0)
-        else
-            @info "Weights supplied"
-            # println("Weights supplied.")
-            return pos, wts
-        end
-
-    # if density mesh is supplied as input
-    else
-        if endswith(fn, ".fits")
-            f = FITS(fn, "r")
-            delta = read(f[1])
-            close(f)
-        # elseif any(endswith.(fn, hdf5_ext))
-        else
-            throw(ErrorException("Input file format not recognised. Allowed formats is .fits"))
-        end
-
-        return delta 
-    end
-
-end
-
 """
 Save void catalogue to file in FITS or txt format.
 """
@@ -176,19 +112,19 @@ end
 if build_mesh
     @info "Reading galaxy position data"
     # println("\nReading galaxy position data...")
-    gal_data = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
+    gal_data = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
     if mesh_settings.is_box
-        cat = GalaxyCatalogue(gal_data...)
+        cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2])
     else
         @info "Reading randoms position data"
         # println("\nReading randoms position data...")
-        rand_data = read_input(build_mesh, data_format, data_cols, args["randoms"], cosmo)
-        cat = GalaxyCatalogue(gal_data..., rand_data...)
+        rand_data = read_input(args["randoms"], build_mesh, data_format, data_cols, cosmo)
+        cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2], rand_pos = rand_data[1], rand_wts = rand_data[2])
     end
 else
     @info "Reading density mesh"
     # println("Reading density mesh...")
-    mesh = read_input(build_mesh, data_format, data_cols, args["data"], cosmo)
+    mesh = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
 end
 
 

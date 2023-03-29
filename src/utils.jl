@@ -1,5 +1,5 @@
 module Utils
-export setup_logging
+export setup_logging, read_input
 
 # using LoggingExtras, Dates
 
