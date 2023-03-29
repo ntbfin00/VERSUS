@@ -117,7 +117,7 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
         end
 
         if wts_supplied == 0 
-            return pos, Array{AbstractFloat}(undef,0)
+            return pos, ones(size(pos,1))
         else
             @info "Weights supplied"
             # println("Weights supplied.")

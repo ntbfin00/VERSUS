@@ -96,6 +96,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims1::Int64,dims2::Int64,dim
         @debug "Creating FTT plan"
         fft_plan = plan_rfft(delta, reverse(indx); num_threads=Threads.nthreads())
     end
+
     @debug "Computing forward FT"
     delta_k = fft_plan * delta
 
