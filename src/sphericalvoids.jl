@@ -9,6 +9,7 @@ include("meshbuilder.jl")
 using .Utils
 using .MeshBuilder
 using FFTW
+using SortingLab
 
 """
 Ouput structure to hold void data.
@@ -35,30 +36,28 @@ end
 """
 Top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float64,box_length::Array{<:AbstractFloat,1})
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float64,res::AbstractFloat,fft_plan)
 
     @info "Smoothing density field with top-hat filter of radius=$R"
-
+    
     # compute FFT of the field
+    if fft_plan == nothing
+        @debug "Creating FTT plan"
+        fft_plan = plan_rfft(delta)
+    end
+
     @debug "Computing forward FT"
-    delta_k = rfft(delta, [3,1,2])
+    delta_k = fft_plan * delta
 
     # loop over independent modes
     @debug "Looping over Fourier modes"
-    # prefact = 2.0*pi*R/box_length
-    # kk1 = fftfreq(dims[1], dims[1])
-    # kk2 = fftfreq(dims[2], dims[2])
-    # kk3 = rfftfreq(dims[3], dims[3])
-    kk1 = fftfreq(dims[1], dims[1]/box_length[1])
-    kk2 = fftfreq(dims[2], dims[2]/box_length[2])
-    kk3 = rfftfreq(dims[3], dims[3]/box_length[3])
+    kkx = rfftfreq(dims[1], 1/res).^2
+    kky = fftfreq(dims[2], 1/res).^2
+    kkz = fftfreq(dims[3], 1/res).^2
     prefact = 2.0*pi*R
-    for (i,kx) in enumerate(kk1)
-        kx2 = kx*kx
-        for (j,ky) in enumerate(kk2)
-            ky2 = ky*ky
-            for (k,kz) in enumerate(kk3)
-                kz2 = kz*kz
+    @inbounds @fastmath for (k,kz2) in enumerate(kkz)
+        for (j,ky2) in enumerate(kky)
+            for (i,kx2) in enumerate(kkx)
 
                 # skip when kx, ky and kz equal zero
                 if i==1 && j==1 && k==1
@@ -74,15 +73,15 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float
         end
     end
 
-    @debug "Computing backward FT" dims=size(real.(irfft(delta_k, dims, [3,1,2])))
-    real.(irfft(delta_k, dims, [3,1,2]))
+    # @debug "Computing backward FT" 
+    return fft_plan, real.(fft_plan \ delta_k)
 
 end
 
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims1::Int64,dims2::Int64,dims3::Int64,indx::Array{Int64,1},R::Float64,box_length::Array{<:AbstractFloat,1},fft_plan,threading::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float64,res::AbstractFloat,fft_plan,threading::Bool)
 
     @info "Smoothing density field with top-hat filter of radius=$R"
 
@@ -94,7 +93,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims1::Int64,dims2::Int64,dim
     # compute FFT of the field
     if fft_plan == nothing
         @debug "Creating FTT plan"
-        fft_plan = plan_rfft(delta, reverse(indx); num_threads=Threads.nthreads())
+        fft_plan = plan_rfft(delta)
     end
 
     @debug "Computing forward FT"
@@ -102,24 +101,16 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims1::Int64,dims2::Int64,dim
 
     # loop over independent modes
     @debug "Looping over Fourier modes"
-    # prefact = 2.0*pi*R/box_length
-    # kk1 = fftfreq(dims1, dims1)
-    # kk2 = fftfreq(dims2, dims2)
-    # kk3 = rfftfreq(dims3, dims3)
-    inv_indx = invperm(indx)
-    kk1 = fftfreq(dims1, dims1/box_length[1])
-    kk2 = fftfreq(dims2, dims2/box_length[2])
-    kk3 = rfftfreq(dims3, dims3/box_length[3])
+    kkx = rfftfreq(dims[1], 1/res).^2
+    kky = fftfreq(dims[2], 1/res).^2
+    kkz = fftfreq(dims[3], 1/res).^2
     prefact = 2.0*pi*R
-    Threads.@threads for (p,kx) in collect(enumerate(kk1))
-        kx2 = kx*kx
-        for (q,ky) in enumerate(kk2)
-            ky2 = ky*ky
-            for (r,kz) in enumerate(kk3)
-                kz2 = kz*kz
+    @inbounds @fastmath Threads.@threads for (k,kz2) in collect(enumerate(kkz))
+        for (j,ky2) in enumerate(kky)
+            for (i,kx2) in enumerate(kkx)
 
                 # index along correct dimension
-                i,j,k = [p,q,r][inv_indx]
+                # i,j,k = [p,q,r][inv_indx]
 
                 # skip when kx, ky and kz equal zero
                 if i==1 && j==1 && k==1
@@ -148,9 +139,9 @@ function underdense_cells(delta::Array{<:AbstractFloat,3},threshold::Float64,dim
 
     # find underdense cells
     local_voids = 0
-    for i = 1:dims[1]
+    @inbounds for k = 1:dims[3]
         for j = 1:dims[2]
-            for k = 1:dims[3]
+            for i = 1:dims[1]
 
                 if delta[i,j,k]<threshold && in_void[i,j,k]==0
                     local_voids += 1
@@ -164,9 +155,8 @@ function underdense_cells(delta::Array{<:AbstractFloat,3},threshold::Float64,dim
     @info "Found $local_voids cells with delta < $threshold"
 
     # sort cells underdensities
-    delta_sort = sortperm(delta_v[1:local_voids])
+    delta_sort = fsortperm(delta_v[1:local_voids])
 
-    @debug "Underdense cells sorted"
     IDs[delta_sort]
 
 end
@@ -195,11 +185,10 @@ Returns 1 if another void has been detected nearby.
 """
 function nearby_voids1(voids_total::Int32,dims::Array{Int64,1},middle::Array{Int64,1},i::Int64,j::Int64,k::Int64,void_radius::Array{Float64,1},void_pos::Array{Int64,2},R_grid::Float64,max_overlap_frac::Float64)
 
-    nearby_voids::Int32 = 0
     overlap_frac::Float64 = 0
 
     # loop over all previously detected voids
-    for l = 1:voids_total
+    @inbounds for l = 1:voids_total
 
         dx = i - void_pos[l,1]
         if abs(dx) > middle[1]
@@ -223,23 +212,22 @@ function nearby_voids1(voids_total::Int32,dims::Array{Int64,1},middle::Array{Int
         if dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid))
 
             if max_overlap_frac == 0
-                nearby_voids = 1
-                break
+                return 1
             else
                 overlap_frac += void_overlap_frac(R_grid,void_radius[l],dist2)
 
                 if overlap_frac > max_overlap_frac
-                    nearby_voids = 1
-                    break
+                    return 1
                 end
 
             end
         end
     end
 
-    nearby_voids
+    return 0
 
 end
+
 
 """
 Identify if void candidate is a new void or belongs to a previously detected void by determining if cells around the candidate belong to other voids.
@@ -248,49 +236,17 @@ Returns 0 if new void, else another void has been detected nearby.
 """
 function nearby_voids2(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,k::Int64,R_grid::Float64,R_grid2::Float64,in_void::Array{Int8,3},max_overlap_frac::Float64)
 
-    nearby_voids::Int32 = 0
     overlap::Int64 = 0
     inv_void_cells = 3/(4*pi*R_grid^3)
 
-    # for l = -Ncells:Ncells
-        # i1 = i+l
-        # if i1>dims[1]
-            # i1 -= dims[1]
-        # end
-        # if i1<1
-            # i1 += dims[1]
-        # end
-
-        # for m = -Ncells:Ncells
-
-            # j1 = j+m
-            # if j1>dims[2]
-                # j1 -= dims[2]
-            # end
-            # if j1<1
-                # j1 += dims[2]
-            # end
-
-            # for n = -Ncells:Ncells
-
-                # k1 = k+n
-                # if k1>dims[3]
-                    # k1 -= dims[3]
-                # end
-                # if k1<1
-                    # k1 += dims[3]
-                # end
-
-
-    # loop over all cells in cubic box around void
-    for l = -Ncells:Ncells
-        i1 = mod1(i+l, dims[1])
+    for n = -Ncells:Ncells        
+        k1 = mod1(k+n, dims[3])
 
         for m = -Ncells:Ncells  
             j1 = mod1(j+m, dims[2])
 
-            for n = -Ncells:Ncells        
-                k1 = mod1(k+n, dims[3])
+            for l = -Ncells:Ncells
+                i1 = mod1(i+l, dims[1])
 
                 # skip if cell does not belong to another void
                 if in_void[i1,j1,k1] == 0
@@ -301,13 +257,11 @@ function nearby_voids2(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,k::I
                     if dist2<R_grid2
 
                         if max_overlap_frac == 0
-                            nearby_voids = 1
-                            break
+                            return 1
                         else
                             overlap += 1
                             if overlap*inv_void_cells > max_overlap_frac
-                                nearby_voids = 1
-                                break
+                                return 1
                             end
                         end
 
@@ -318,7 +272,7 @@ function nearby_voids2(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,k::I
         end
     end
 
-    nearby_voids
+    return 0
 
 end
 
@@ -334,20 +288,20 @@ function nearby_voids2(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,k::I
     inv_void_cells = 3/(4*pi*R_grid^3)
 
     # loop over all cells in cubic box around void
-    Threads.@threads for l = -Ncells:Ncells
+    Threads.@threads for n = -Ncells:Ncells
 
         # skip thread once a nearby void has been detected
         if nearby_voids[]>0 
             continue
         end
 
-        i1 = mod1(i+l, dims[1])
+        k1 = mod1(k+n, dims[3])
 
         for m = -Ncells:Ncells  
             j1 = mod1(j+m, dims[2])
 
-            for n = -Ncells:Ncells        
-                k1 = mod1(k+n, dims[3])
+            for l = -Ncells:Ncells        
+                i1 = mod1(i+l, dims[1])
 
                 # skip if cell does not belong to another void
                 if in_void[i1,j1,k1] == 0
@@ -383,14 +337,14 @@ Mark cells in radius R around void center as belonging to void.
 function mark_void_region!(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,k::Int64,R_grid2::Float64,in_void::Array{Int8,3})
 
     # loop over all cells in cubic box around void
-    for l = -Ncells:Ncells  
-        i1 = mod1(i+l, dims[1])
+    for n = -Ncells:Ncells        
+        k1 = mod1(k+n, dims[3])
 
         for m = -Ncells:Ncells  
             j1 = mod1(j+m, dims[2])
 
-            for n = -Ncells:Ncells        
-                k1 = mod1(k+n, dims[3])
+            for l = -Ncells:Ncells  
+                i1 = mod1(i+l, dims[1])
 
                 dist2 = l*l + m*m + n*n
                 if dist2<R_grid2
@@ -411,14 +365,14 @@ function mark_void_region!(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,
     end
 
     # loop over all cells in cubic box around void
-    Threads.@threads for l = -Ncells:Ncells  
-        i1 = mod1(i+l, dims[1])
+    Threads.@threads for n = -Ncells:Ncells        
+        k1 = mod1(k+n, dims[3])
 
         for m = -Ncells:Ncells  
             j1 = mod1(j+m, dims[2])
 
-            for n = -Ncells:Ncells        
-                k1 = mod1(k+n, dims[3])
+            for l = -Ncells:Ncells  
+                i1 = mod1(i+l, dims[1])
 
                 dist2 = l*l + m*m + n*n
                 if dist2<R_grid2
@@ -429,6 +383,7 @@ function mark_void_region!(Ncells::Int64,dims::Array{Int64,1},i::Int64,j::Int64,
             end
         end
     end
+
 end
 
 
@@ -457,11 +412,8 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     # dimesions of delta
     dims = collect(size(delta))
     middle = dims .÷ 2
-    cells_total = length(dims)
-    # sort dimensions from largest to smallest
-    indx = sortperm(dims; rev=true)
-    dims_sorted = dims[indx]
-    dims23 = dims_sorted[2]*dims_sorted[3]
+    cells_total = prod(dims)
+    dims23 = dims[2]*dims[3]
 
     if par.radii == [0]
         throw(ErrorException("No void radii provided. Must be provided as a 1D array."))
@@ -507,13 +459,15 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     # find voids at each input radius R
     voids_total::Int32 = 0  # total number of voids found
     expected_filling_frac::Float64 = 0.0
-    for (q,R) in enumerate(Radii)  
+    @inbounds for (q,R) in enumerate(Radii)  
 
         if !threading
-            delta_sm = smoothing(delta, dims, R, box_length)
+            fft_plan, delta_sm = smoothing(delta, dims, R, res, fft_plan)
         else
-            fft_plan, delta_sm = smoothing(delta, dims_sorted..., indx, R, box_length, fft_plan, threading)
+            # fft_plan, delta_sm = smoothing(delta, dims_sorted..., indx, R, box_length, fft_plan, threading)
+            fft_plan, delta_sm = smoothing(delta, dims, R, res, fft_plan, threading)
         end
+        @debug "Smoothing complete"
 
         # check if cells are below threshold
         if minimum(delta_sm)>threshold
@@ -523,6 +477,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
         
         # identify cells below density threshold
         cell_ID = underdense_cells(delta_sm, threshold, dims, dims23, in_void, delta_v, IDs)
+        @debug "Underdense cells sorted" n=length(cell_ID)
 
         R_grid = R/res
         R_grid2 = R_grid*R_grid
@@ -538,7 +493,9 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
         @info "Identifying nearby voids using mode $mode"
         voids_with_R = 0  # voids found with radius R
         for ID in cell_ID
-            i,j,k = (ID÷dims23, (ID%dims23)÷dims[3], (ID%dims23)%dims[3]) .+ 1
+            i = ID÷dims23 + 1
+            j = (ID%dims23)÷dims[3] + 1
+            k = (ID%dims23)%dims[3] + 1
 
             # if cell belong to a void, continue
             if in_void[i,j,k] == 1
@@ -561,7 +518,9 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
                 voids_with_R += 1
                 voids_total += 1
 
-                void_pos[voids_total,:] .= i,j,k
+                void_pos[voids_total,1] = i
+                void_pos[voids_total,2] = j
+                void_pos[voids_total,3] = k
                 void_radius[voids_total] = R_grid
 
                 # flag cells belonging to new void
@@ -589,7 +548,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
 
     # compute the void size function (# of voids/Volume/dR)
     @info "Computing the void size function"
-    for i = 1:r_bins
+    @inbounds for i = 1:r_bins
         r = vcat(Radii, 0)
         vsf[i,1] = 0.5*(r[i]+r[i+1])
         vsf[i,2] = Nvoids[i]/(prod(box_length)*(r[i]-r[i+1]))
@@ -611,11 +570,16 @@ Void finding with galaxy positions.
 """
 function voidfinder(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
 
+    if par.radii == [0] || mesh.nbins_vf == [0]
+        nbins, r_sep = gal_dens_bin(cat, mesh)
+    end
     # set default void radii to 2-10x mean galaxy separation
     if par.radii == [0]
-        n_bins, r_sep = gal_dens_bin(cat, mesh)
         par.radii = [10:-1:2;] * r_sep
-        mesh.nbins_vf = n_bins
+    end
+    # set default void radii to 2-10x mean galaxy separation
+    if mesh.nbins_vf == [0]
+        mesh.nbins_vf = nbins
     end
 
     mesh_obj = create_mesh(cat, mesh)

@@ -24,11 +24,11 @@ end
     dtype::String = "f4"
     nbins_vf::Array{Int,1} = [0]  # number of bins for voidfinding (calculated using galaxy density if 0)
     is_box::Bool = true  # set to false for survey-like data
-    box_length::Float64 = 1500.  # box length [Mpc/h] (disregarded if is_box=false)
-    box_centre::Array{Float64,1} = fill(box_length/2, 3) # box centre (disregarded if is_box=false)
+    box_length::Array{Float64,1} = [0]  # box length [Mpc/h] (disregarded if is_box=false)
+    box_centre::Array{Float64,1} = box_length./2 # box centre (disregarded if is_box=false)
     padding::Float64 = 1.2  # box padding factor (disregarded if is_box=true)
     save_mesh::Bool = true
-    mesh_fn::String = "mesh_" * string(nbins_vf) * "_" * dtype
+    mesh_fn::String = ""  # defaults to mesh_<nbins_vf>_<dtype>.fits
 
     # reconstruction parameters
     recon_alg::String = "IFFTparticle"
