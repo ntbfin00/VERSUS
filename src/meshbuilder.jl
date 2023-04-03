@@ -57,6 +57,7 @@ function optimal_binning(nbins::Array{Int,1})
         n_opt[i] = minimum(diff[diff .>=0]) + n
     end
 
+    @debug nbins_opt = Int.(n_opt)
     Int.(n_opt)
 
 end
@@ -67,15 +68,19 @@ Return both the optimal number of bins based on the galaxy density and the galax
 function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
         @info "Calculating default bins based on galaxy density"
 
+        # number of bins per average galaxy separation
+        f = 2
+
         if mesh.is_box
             # calculate the volume of box
-            vol = mesh.box_length^3 
+            vol = prod(mesh.box_length)
             # calculate mean galaxy density
             mean_dens = size(cat.gal_pos,1)/vol
             r_sep = (4 * pi * mean_dens / 3)^(-1/3)
             # return optimal_binning(nbins_est), r_sep
-            nbins = ceil(Int, mesh.box_length/r_sep)
-            return fill(nbins,3), r_sep
+            # use two bins per r_sep
+            nbins = ceil.(Int, f * mesh.box_length/r_sep)
+            return nbins, r_sep
         else
             n_itr = 4
             cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
@@ -93,7 +98,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
                 @debug "Iteration $i, estimated nbins: $nbins_est"
                 if i == n_itr
                     # return optimal_binning(nbins_est), r_sep_est
-                    return nbins_est, r_sep_est
+                    return ceil.(f * nbins_est), r_sep_est
                 end
                 nbins_tot = prod(nbins_est)
                 cell_vol = vol/nbins_tot
@@ -203,18 +208,17 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPara
         @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
     end
 
+    # calculate default number of bins based on box_length and smoothing radius
+    if mesh.nbins_recon == [0]
+        @info "Calculating default bins based on smoothing radius"
+        rec = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon)[1]
+        # Determine the optimum number of bins for FFTs below the smoothing radius
+        nsmooth = ceil.(Int, rec.boxsize/mesh.r_smooth)
+        mesh.nbins_recon = optimal_binning(nsmooth)
+    end
+
     # create the grid
     rec, data = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon)
-
-    # calculate default number of bins based on box_length and smoothing radius
-    if mesh.nbins_recon == 0
-        @info "Calculating default bins based on smoothing radius"
-        # Determine the optimum number of bins for FFTs below the smoothing radius
-        nsmooth = rec.boxsize./mesh.r_smooth
-        nbins = optimal_binning(nsmooth)
-        # recalculate the mesh with new nbins
-        rec, data = set_recon_engine(cosmo, cat, mesh, nbins)
-    end
 
     if maximum(rec.boxsize./rec.nmesh) > mesh.r_smooth
         @warn "Smoothing scale is less than cellsize."
@@ -247,13 +251,6 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
     # create the grid
     rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf)[1]
 
-    # calculate default number of voidfinding bins based on galaxy density
-    if mesh.nbins_vf == 0
-        nbins = gal_dens_bin(cat, mesh)[1]
-        # recalculate the mesh with new nbins
-        rec = set_recon_engine(cosmo_vf, cat, mesh, nbins)[1]
-    end
-
     compute_density_field(cat, mesh, rec, 0.)
 
     delta = rec.mesh_delta.value
@@ -266,7 +263,12 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         if !isdir("mesh/")
             mkdir("mesh/")
         end 
-        fn = "mesh/" * mesh.mesh_fn * ".fits"
+        if mesh.mesh_fn == ""
+            bins = string.(mesh.nbins_vf, "_")
+            fn = "mesh/mesh_" * string(bins...) * mesh.dtype * ".fits"
+        else
+            fn = "mesh/" * mesh.mesh_fn * ".fits"
+        end
         f = FITS(fn, "w")
         write(f, delta)
         close(f)
