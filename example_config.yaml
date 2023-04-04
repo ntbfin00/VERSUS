@@ -22,8 +22,6 @@ mesh:
   dtype:
   nbins_vf: 
   is_box:
-  box_length:
-  box_centre:
   padding:
   recon_alg:
   nbins_recon:

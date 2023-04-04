@@ -71,41 +71,31 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
         # number of bins per average galaxy separation
         f = 2
 
-        if mesh.is_box
-            # calculate the volume of box
-            vol = prod(mesh.box_length)
-            # calculate mean galaxy density
-            mean_dens = size(cat.gal_pos,1)/vol
-            r_sep = (4 * pi * mean_dens / 3)^(-1/3)
-            # return optimal_binning(nbins_est), r_sep
-            # use two bins per r_sep
-            nbins = ceil.(Int, f * mesh.box_length/r_sep)
-            return nbins, r_sep
-        else
+        cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
+        rec = set_recon_engine(cosmo_vf, cat, mesh, [0], 1.)[1]
+        vol = prod(rec.boxsize)
+        mean_dens = size(cat.gal_pos,1)/vol
+        r_sep = (4 * pi * mean_dens / 3)^(-1/3)
+
+        if !mesh.is_box
             n_itr = 4
-            cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
-            rec = set_recon_engine(cosmo_vf, cat, mesh, [0])[1]
-            vol = prod(rec.boxsize)
-            mean_dens = size(cat.gal_pos,1)/vol
             rand_pos = np.array(cat.rand_pos)
             rand_wts = np.array(cat.rand_wts)
             # iterate for more accurate estimation
             for i = 1:n_itr
-                # estimate galaxy separation (overestimate)
-                r_sep_est = (4 * pi * mean_dens / 3)^(-1/3)
                 # estimate nbins (underestimate)
-                nbins_est = ceil.(Int, rec.boxsize/r_sep_est)
-                @debug "Iteration $i, estimated nbins: $nbins_est"
+                nbins = ceil.(Int, rec.boxsize/r_sep)
+                @debug "Iteration $i, estimated nbins: $nbins"
                 if i == n_itr
-                    # return optimal_binning(nbins_est), r_sep_est
-                    return ceil.(f * nbins_est), r_sep_est
+                    break
                 end
-                nbins_tot = prod(nbins_est)
+
+                nbins_tot = prod(nbins)
                 cell_vol = vol/nbins_tot
 
                 @debug "Assigning randoms to estimate volume"
                 # place randoms on mesh
-                rec = set_recon_engine(cosmo_vf, cat, mesh, nbins_est)[1]
+                rec = set_recon_engine(cosmo_vf, cat, mesh, nbins, 1.)[1]
                 rec.assign_randoms(rand_pos, rand_wts)
 
                 @debug "Counting filled cells"
@@ -116,34 +106,34 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
                 @debug "Estimating more accurate mean density" 
                 # estimate mean galaxy density
                 mean_dens = size(cat.gal_pos,1)/(filled_cells*cell_vol)
+                # estimate galaxy separation (overestimate)
+                r_sep = (4 * pi * mean_dens / 3)^(-1/3)
+
             end
         end
+
+        nbins = ceil.(Int, f * mesh.padding*rec.boxsize/r_sep)
+
+        return nbins, r_sep
 
 end
 
 """
 Initialise mesh and set algorithm for reconstruction.
 """
-function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1})
+function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1}, pad::Float64)
     @debug "Initialising mesh"
 
     if !mesh.is_box && size(cat.rand_pos,1) == 0
         throw(ErrorException("is_box is set to false but no randoms have been supplied."))
     end
 
-    # determine box size from input
+    @debug "Setting mesh based on positions" nbins pad
     if mesh.is_box
-        @debug "Setting mesh parameters to box inputs"
         los = mesh.los
-        boxsize = mesh.box_length
-        boxcenter = mesh.box_centre
-        pos = nothing
-    # determine box size from random positions and padding
+        pos = np.array(cat.gal_pos)
     else 
-        @debug "Setting mesh parameters to be calculated from positions"
         los = nothing
-        boxsize = nothing
-        boxcenter = nothing
         pos = np.array(cat.rand_pos)
     end
 
@@ -151,17 +141,17 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPa
     if mesh.recon_alg == "IFFTparticle"
         @debug "Setting IFFTparticle mesh"
         recon = pyimport("pyrecon.iterative_fft_particle")
-        rec = recon.IterativeFFTParticleReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=mesh.padding, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.IterativeFFTParticleReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, positions=pos, boxpad=pad, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = "data"
     elseif mesh.recon_alg == "IFFT"
         @debug "Setting IFFT mesh"
         recon = pyimport("pyrecon.iterative_fft")
-        rec = recon.IterativeFFTReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=mesh.padding, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.IterativeFFTReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, positions=pos, boxpad=pad, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = np.array(cat.gal_pos)
     elseif mesh.recon_alg == "MultiGrid"
         @debug "Setting MultiGrid mesh"
         recon = pyimport("pyrecon.multigrid")
-        rec = recon.MultiGridReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, boxsize=boxsize, boxcenter=boxcenter, boxpad=mesh.padding, positions=pos, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
+        rec = recon.MultiGridReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, positions=pos, boxpad=pad, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
         data = np.array(cat.gal_pos)
     else
         throw(ErrorException("Reconstruction algorithm not recognised. Allowed algorithms are IFFTparticle, IFFT and MultiGrid."))
@@ -211,14 +201,14 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPara
     # calculate default number of bins based on box_length and smoothing radius
     if mesh.nbins_recon == [0]
         @info "Calculating default bins based on smoothing radius"
-        rec = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon)[1]
+        rec = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon, mesh.padding)[1]
         # Determine the optimum number of bins for FFTs below the smoothing radius
         nsmooth = ceil.(Int, rec.boxsize/mesh.r_smooth)
         mesh.nbins_recon = optimal_binning(nsmooth)
     end
 
     # create the grid
-    rec, data = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon)
+    rec, data = set_recon_engine(cosmo, cat, mesh, mesh.nbins_recon, mesh.padding)
 
     if maximum(rec.boxsize./rec.nmesh) > mesh.r_smooth
         @warn "Smoothing scale is less than cellsize."
@@ -244,12 +234,16 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
 
     @info "Creating density mesh"
 
-    # set bias=1 so voids are found in the galaxy field
+    # set bias=1 so voids are found in the galaxy field (not matter field)
     # other cosmological parameters are have no effect on mesh construction 
     cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
 
-    # create the grid
-    rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf)[1]
+    # no padding for voidfinding if box
+    if mesh.is_box
+        rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, 1.)[1]
+    else
+        rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, mesh.padding)[1]
+    end
 
     compute_density_field(cat, mesh, rec, 0.)
 

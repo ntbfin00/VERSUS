@@ -22,11 +22,10 @@ end
 
 @with_kw mutable struct MeshParams
     dtype::String = "f4"
-    nbins_vf::Array{Int,1} = [0]  # number of bins for voidfinding (calculated using galaxy density if 0)
-    is_box::Bool = true  # set to false for survey-like data
-    box_length::Array{Float64,1} = [0]  # box length [Mpc/h] (disregarded if is_box=false)
-    box_centre::Array{Float64,1} = box_length./2 # box centre (disregarded if is_box=false)
-    padding::Float64 = 1.2  # box padding factor (disregarded if is_box=true)
+    nbins_vf::Array{Int,1} = [0]  # number of bins for voidfinding (calculated using galaxy density if 0) 
+                                  # [MUST GIVE THE SAME CELL RESOLUTION (LENGTH/NBINS) FOR EACH DIMENSION]
+    is_box::Bool = true
+    padding::Float64 = 1.1  # survey (and reconstruction) padding factor
     save_mesh::Bool = true
     mesh_fn::String = ""  # defaults to mesh_<nbins_vf>_<dtype>.fits
 
