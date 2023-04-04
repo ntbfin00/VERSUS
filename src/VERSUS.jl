@@ -24,7 +24,6 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
 
     out_file = "output/" * fn
     @info "Writing void catalogue to file"
-    # println("\nWriting void catalogue to file...")
     if output_type == "fits"
         data = Dict("positions" => void_cat.positions, "radii" => void_cat.radii)
         f = FITS(out_file * ".fits", "w")
@@ -42,7 +41,6 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
         throw(ErrorException("Output file format not recognised. Allowed formats are .fits and .txt"))
     end
     @info "Void catalogue written to $out_file"
-    # println("Void catalogue written to " * out_file)
 end
 
 
@@ -64,7 +62,7 @@ end
 args = parse_args(ARGS, s)
 
 # setup logging
-logger = setup_logging("debug")
+logger = setup_logging()
 
 # load settings
 if endswith(args["config"], ".yaml")
@@ -111,19 +109,16 @@ end
 # read input data
 if build_mesh
     @info "Reading galaxy position data"
-    # println("\nReading galaxy position data...")
     gal_data = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
     if mesh_settings.is_box
         cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2])
     else
         @info "Reading randoms position data"
-        # println("\nReading randoms position data...")
         rand_data = read_input(args["randoms"], build_mesh, data_format, data_cols, cosmo)
         cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2], rand_pos = rand_data[1], rand_wts = rand_data[2])
     end
 else
     @info "Reading density mesh"
-    # println("Reading density mesh...")
     mesh = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
 end
 
