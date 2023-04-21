@@ -88,7 +88,7 @@ function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float
     # check parallelisation is to be used
     if !threading
         throw(ErrorException("Threading is set to False, cannot use this function!"))
-    end
+    end 
 
     # compute FFT of the field
     if fft_plan == nothing
@@ -507,6 +507,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
         if !threading
             fft_plan, delta_sm = smoothing(delta, dims, R, res, fft_plan)
         else
+            FFTW.set_num_threads(Threads.nthreads())
             fft_plan, delta_sm = smoothing(delta, dims, R, res, fft_plan, threading)
         end
         @debug "Smoothing complete"

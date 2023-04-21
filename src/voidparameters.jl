@@ -38,7 +38,7 @@ end
 
 @with_kw mutable struct SphericalVoidParams
     radii::Array{Float64,1} = [0]  # void radii [Mpc/h] (calculated using galaxy density if 0)
-    min_dens_cut::Float64 = 1.0
+    min_dens_cut::Float64 = 0.3
     max_overlap_frac::Float64 = 0.
 end
 
