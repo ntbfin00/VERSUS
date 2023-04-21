@@ -1,9 +1,11 @@
 module MeshBuilder
 
-export GalaxyCatalogue, gal_dens_bin, to_cartesian, reconstruction, create_mesh
+export gal_dens_bin, to_cartesian, reconstruction, create_mesh
 
+include("voidparameters.jl")
 include("utils.jl")
 
+using .VoidParameters
 using .Utils
 using PyCall
 using FITSIO
@@ -223,7 +225,7 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPara
     @info "Galaxy positions reconstructed"
     
     # output reconstructed catalogue
-    GalaxyCatalogue(rec_gal_pos, cat.gal_wts, cat.rand_pos, cat.rand_wts)
+    Main.VoidParameters.GalaxyCatalogue(rec_gal_pos, cat.gal_wts, cat.rand_pos, cat.rand_wts)
 
 end
 

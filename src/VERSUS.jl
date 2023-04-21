@@ -68,6 +68,14 @@ logger = setup_logging()
 if endswith(args["config"], ".yaml")
     config = YAML.load_file(args["config"])
 
+    # check that box parameters have been provided if not building mesh
+    build_mesh = get(config["input"], "build_mesh", true)
+    box_length = get(config["input"], "box_length", nothing)
+    box_centre= get(config["input"], "box_centre", nothing)
+    if !build_mesh && (isnothing(box_length) || isnothing(box_centre))
+        throw(ErrorException("build_mesh is set to false. Mesh has been provided without box_length or box_centre."))
+    end
+
     # remove nothing values
     filter!(i -> !isnothing(i.second), config["input"])
     filter!(i -> !isnothing(i.second), config["output"])
@@ -77,7 +85,6 @@ if endswith(args["config"], ".yaml")
     
     data_format = get(config["input"], "data_format", "xyz")
     data_cols = get(config["input"], "data_cols", ["x","y","z"])
-    build_mesh = get(config["input"], "build_mesh", true)
     do_recon = get(config["input"], "do_recon", false)
     run_spherical_vf = get(config["input"], "run_spherical_vf", true)
     output_fn = get(config["output"], "output_fn", "void_cat")
@@ -135,7 +142,7 @@ if run_spherical_vf
     if build_mesh
         spherical_voids = SphericalVoids.voidfinder(cat, mesh_settings, par_sph)
     else
-        spherical_voids = SphericalVoids.voidfinder(mesh, mesh_settings.box_length, mesh_settings.box_centre, par_sph)
+        spherical_voids = SphericalVoids.voidfinder(mesh, box_length, box_centre, par_sph)
     end
     save_void_cat(output_fn * "_spherical", output_type, spherical_voids)
 else
