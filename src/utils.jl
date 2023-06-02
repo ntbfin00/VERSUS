@@ -1,5 +1,5 @@
 module Utils
-export setup_logging, read_input
+export setup_logging, read_input, to_cartesian, Atomic
 
 include("voidparameters.jl")
 
@@ -7,6 +7,9 @@ using .VoidParameters
 using LoggingExtras
 using PyCall
 using FITSIO
+
+cosmology = pyimport("astropy.cosmology")
+utils = pyimport("pyrecon.utils")
 
 """
 Setup the logging with timer. "level" can be used to change the depth of logging.
@@ -41,30 +44,33 @@ function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:Abstrac
     if angle == "degrees"
         @debug "Angle in degrees"
         degree = true
+        conversion = pi/180.
     elseif angle == "radians"
         @debug "Angle in radians"
         degree = false
+        conversion = 1.
     else
         throw(ErrorException("Angle type must be either 'degrees' or 'radians'."))
     end
-
-    np = pyimport("numpy")
-    cosmology = pyimport("astropy.cosmology")
-    utils = pyimport("pyrecon.utils")
 
     # compute distances from redshifts
     @debug "Setting cosmology"
     c = cosmology.LambdaCDM(H0=cosmo.h*100, Om0=cosmo.omega_m, Ode0=cosmo.omega_l)
 
-    ra = np.array(pos[:,1])
-    dec = np.array(pos[:,2]) 
-    z = np.array(pos[:,3])
-
     @debug "Calculating comoving distances"
-    dist = c.comoving_distance(z)
+    ra = pos[:,1]
+    dec = pos[:,2]
+    z = pos[:,3]
+    dist = c.comoving_distance(PyObject(z))
 
     @debug "Converting to cartesian"
-    utils.sky_to_cartesian(dist,ra,dec, degree=degree)
+    cos_dec = cos.(dec * conversion)
+    pos[:,1] = cos_dec .* cos.(ra * conversion)
+    pos[:,2] = cos_dec .* sin.(ra * conversion)
+    pos[:,3] = sin.(dec .* conversion)
+
+    dist .* pos
+    
 end
 
 """
@@ -97,10 +103,8 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
 
         if data_format == "xyz"
             @info "Input format: Cartesian"
-            # println("Input format: Cartesian.")
         elseif data_format == "rdz"
             @info "Input format: Sky"
-            # println("Input format: Sky, converting to cartesian...")
             pos = to_cartesian(cosmo, pos)
         else
             throw(ErrorException("Position data format not recognised. Only formats 'xyz' (cartesian) or 'rdz' (sky) allowed."))
@@ -110,7 +114,6 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
             return pos, ones(size(pos,1))
         else
             @info "Weights supplied"
-            # println("Weights supplied.")
             return pos, wts
         end
 
@@ -128,6 +131,11 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
         return delta 
     end
 
+end
+
+# atomic counter for threading
+mutable struct Atomic
+    @atomic counter::Int64
 end
 
 end

@@ -1,7 +1,7 @@
-include("voidparameters.jl")
-include("meshbuilder.jl")
-include("sphericalvoids.jl")  # load file into global scope
-include("utils.jl")
+include("src/voidparameters.jl")
+include("src/meshbuilder.jl")
+include("src/sphericalvoids.jl")  
+include("src/utils.jl")
 
 using .Utils
 using .VoidParameters
@@ -29,7 +29,7 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
         f = FITS(out_file * ".fits", "w")
         write(f, data)
         close(f)
-        vsf = Dict("r_bins" => void_cat.vsf[:,1], "vsf" => void_cat.vsf[:,2])
+        vsf = Dict("R" => void_cat.vsf[:,1], "N" => void_cat.vsf[:,2], "n" => void_cat.vsf[:,3], "rmean" => void_cat.vsf[:,4], "dn/dlnR" => void_cat.vsf[:,5])
         g = FITS(out_file * "_vsf.fits", "w")
         write(g, vsf)
         close(g)
@@ -68,29 +68,41 @@ logger = setup_logging()
 if endswith(args["config"], ".yaml")
     config = YAML.load_file(args["config"])
 
+    if any(keys(config) .== "input")
+        filter!(i -> !isnothing(i.second), config["input"])
+        data_format = get(config["input"], "data_format", "xyz")
+        data_cols = get(config["input"], "data_cols", ["x","y","z"])
+        do_recon = get(config["input"], "do_recon", false)
+        run_spherical_vf = get(config["input"], "run_spherical_vf", true)
+        build_mesh = get(config["input"], "build_mesh", true)
+        box_length = get(config["input"], "box_length", nothing)
+        box_centre = get(config["input"], "box_centre", nothing)
+    else
+        data_format = "xyz"
+        data_cols = ["x","y","z"]
+        do_recon = false
+        run_spherical_vf = true
+        build_mesh = true
+        box_length = nothing
+        box_centre = nothing
+    end
+
     # check that box parameters have been provided if not building mesh
-    build_mesh = get(config["input"], "build_mesh", true)
-    box_length = get(config["input"], "box_length", nothing)
-    box_centre= get(config["input"], "box_centre", nothing)
     if !build_mesh && (isnothing(box_length) || isnothing(box_centre))
         throw(ErrorException("build_mesh is set to false. Mesh has been provided without box_length or box_centre."))
     end
 
-    # remove nothing values
-    filter!(i -> !isnothing(i.second), config["input"])
-    filter!(i -> !isnothing(i.second), config["output"])
-    filter!(i -> !isnothing(i.second), config["cosmo"])
-    filter!(i -> !isnothing(i.second), config["mesh"])
-    filter!(i -> !isnothing(i.second), config["spherical_voids"])
-    
-    data_format = get(config["input"], "data_format", "xyz")
-    data_cols = get(config["input"], "data_cols", ["x","y","z"])
-    do_recon = get(config["input"], "do_recon", false)
-    run_spherical_vf = get(config["input"], "run_spherical_vf", true)
-    output_fn = get(config["output"], "output_fn", "void_cat")
-    output_type = get(config["output"], "output_type", "fits")
+    if any(keys(config) .== "output")
+        filter!(i -> !isnothing(i.second), config["output"])
+        output_fn = get(config["output"], "output_fn", "void_cat")
+        output_type = get(config["output"], "output_type", "fits")
+    else
+        output_fn = "void_cat"
+        output_type = "fits"
+    end
 
     if any(keys(config) .== "cosmo")
+        filter!(i -> !isnothing(i.second), config["cosmo"])
         cosmology = Dict()
         [cosmology[Symbol(key)] = value for (key,value) in config["cosmo"]]
         cosmo = Cosmology(;cosmology...)
@@ -98,6 +110,7 @@ if endswith(args["config"], ".yaml")
         cosmo = Cosmology()
     end
     if any(keys(config) .== "mesh")
+        filter!(i -> !isnothing(i.second), config["mesh"])
         mesh = Dict()
         [mesh[Symbol(key)] = value for (key,value) in config["mesh"]]
         mesh_settings = MeshParams(;mesh...)
@@ -105,6 +118,7 @@ if endswith(args["config"], ".yaml")
         mesh_settings = MeshParams()
     end
     if run_spherical_vf
+        filter!(i -> !isnothing(i.second), config["spherical_voids"])
         sph_voids = Dict()
         [sph_voids[Symbol(key)] = value for (key,value) in config["spherical_voids"]]
         par_sph = SphericalVoidParams(;sph_voids...)

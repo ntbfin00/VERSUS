@@ -1,6 +1,6 @@
 module MeshBuilder
 
-export gal_dens_bin, to_cartesian, reconstruction, create_mesh
+export gal_dens_bin, reconstruction, create_mesh
 
 include("voidparameters.jl")
 include("utils.jl")
@@ -9,37 +9,6 @@ using .VoidParameters
 using .Utils
 using PyCall
 using FITSIO
-
-np = pyimport("numpy")
-utils = pyimport("pyrecon.utils")
-cosmology = pyimport("astropy.cosmology")
-
-"""
-Convert sky positions and redshift to cartesian coordinates. 
-"""
-function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:AbstractFloat,2}; angle::String="degrees")
-    @info "Converting sky positions to cartesian"
-
-    if angle == "degrees"
-        @debug "Angle in degrees"
-        degree = true
-    elseif angle == "radians"
-        @debug "Angle in radians"
-        degree = false
-    else
-        throw(ErrorException("Angle type must be either 'degrees' or 'radians'."))
-    end
-
-    # compute distances from redshifts
-    @debug "Setting cosmology"
-    c = cosmology.LambdaCDM(H0=cosmo.h*100, Om0=cosmo.omega_m, Ode0=cosmo.omega_l)
-    pos = np.array(pos)
-    @debug "Calculating comoving distances"
-    dist = c.comoving_distance(pos[:,3])
-    
-    @debug "Converting to cartesian"
-    utils.sky_to_cartesian(dist,pos[:,1],pos[:,2], degree=degree)
-end
 
 """
 Returns the optimal number of bins for FFTWs above the input value.
@@ -68,7 +37,7 @@ end
 Return both the optimal number of bins based on the galaxy density and the galaxy separation.
 """
 function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
-        @info "Calculating default bins based on galaxy density"
+        @info "Estimating galaxy density"
 
         # number of bins per average galaxy separation
         f = 2
@@ -81,14 +50,18 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
 
         if !mesh.is_box
             n_itr = 4
-            rand_pos = np.array(cat.rand_pos)
-            rand_wts = np.array(cat.rand_wts)
+            rand_pos = PyObject(cat.rand_pos)
+            rand_wts = PyObject(cat.rand_wts)
+            vol_est = 0
             # iterate for more accurate estimation
+            @debug "Beginning iteration"
             for i = 1:n_itr
                 # estimate nbins (underestimate)
                 nbins = ceil.(Int, rec.boxsize/r_sep)
-                @debug "Iteration $i, estimated nbins: $nbins"
                 if i == n_itr
+                    @debug "Iteration complete" i, vol_est, nbins
+                    # compute the final estimated survey volume
+                    vol = vol_est
                     break
                 end
 
@@ -104,6 +77,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
                 # find where randoms are greater than 0.01 * average randoms per cell
                 threshold = 0.01 * sum(rec.mesh_randoms.value)/nbins_tot
                 filled_cells = count(q->(q > threshold), rec.mesh_randoms.value)
+                vol_est = filled_cells * cell_vol
 
                 @debug "Estimating more accurate mean density" 
                 # estimate mean galaxy density
@@ -111,12 +85,14 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
                 # estimate galaxy separation (overestimate)
                 r_sep = (4 * pi * mean_dens / 3)^(-1/3)
 
+                @debug "Iterating" i, vol_est, nbins
+
             end
         end
 
         nbins = ceil.(Int, f * mesh.padding*rec.boxsize/r_sep)
 
-        return nbins, r_sep
+        return nbins, r_sep, vol
 
 end
 
@@ -133,10 +109,10 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPa
     @debug "Setting mesh based on positions" nbins pad
     if mesh.is_box
         los = mesh.los
-        pos = np.array(cat.gal_pos)
+        pos = PyObject(cat.gal_pos)
     else 
         los = nothing
-        pos = np.array(cat.rand_pos)
+        pos = PyObject(cat.rand_pos)
     end
 
     # set the mesh
@@ -149,21 +125,16 @@ function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPa
         @debug "Setting IFFT mesh"
         recon = pyimport("pyrecon.iterative_fft")
         rec = recon.IterativeFFTReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, positions=pos, boxpad=pad, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
-        data = np.array(cat.gal_pos)
+        data = PyObject(cat.gal_pos)
     elseif mesh.recon_alg == "MultiGrid"
         @debug "Setting MultiGrid mesh"
         recon = pyimport("pyrecon.multigrid")
         rec = recon.MultiGridReconstruction(f=cosmo.f, bias=cosmo.bias, los=los, nmesh=nbins, positions=pos, boxpad=pad, wrap=true, dtype=mesh.dtype, nthreads=Threads.nthreads())
-        data = np.array(cat.gal_pos)
+        data = PyObject(cat.gal_pos)
     else
         throw(ErrorException("Reconstruction algorithm not recognised. Allowed algorithms are IFFTparticle, IFFT and MultiGrid."))
     end
 
-
-    # display only when nbins is set
-    if nbins != [0]
-        @info "Mesh settings: box_length=$(rec.boxsize), nbins=$(rec.nmesh)"
-    end
 
     return rec, data
 
@@ -173,14 +144,14 @@ end
 function compute_density_field(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, rec, r_smooth::Float64)
 
     @info "Assigning galaxies to grid"
-    gal_pos = np.array(cat.gal_pos)
-    gal_wts = np.array(cat.gal_wts)
+    gal_pos = PyObject(cat.gal_pos)
+    gal_wts = PyObject(cat.gal_wts)
     rec.assign_data(gal_pos, gal_wts)
 
     if !mesh.is_box
         @info "Assigning randoms to grid"
-        rand_pos = np.array(cat.rand_pos)
-        rand_wts = np.array(cat.rand_wts)
+        rand_pos = PyObject(cat.rand_pos)
+        rand_wts = PyObject(cat.rand_wts)
         rec.assign_randoms(rand_pos, rand_wts)
     end
 
@@ -247,9 +218,19 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, mesh.padding)[1]
     end
 
+    # determine density on mesh
     compute_density_field(cat, mesh, rec, 0.)
 
     delta = rec.mesh_delta.value
+
+    # compute survey mask for empty cells
+    if !mesh.is_box
+        threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(mesh.nbins_vf)
+        mask = findall(q->(q <= threshold), rec.mesh_randoms.value)
+    else
+        mask = nothing
+    end
+
     @debug "Check for NaN values in mesh " any_NaN = any(isnan, delta)
 
     @info "$(string(typeof(delta))[7:13]) density mesh set"
@@ -271,7 +252,7 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         @info "$fn saved to file"
     end
         
-    return delta, rec.boxsize, rec.boxcenter
+    return delta, mask, rec.boxsize, rec.boxcenter
 
 end
 

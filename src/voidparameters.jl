@@ -14,10 +14,10 @@ using Parameters
 end
 
 @with_kw mutable struct GalaxyCatalogue
-    gal_pos::Array{AbstractFloat,2}
-    gal_wts::Array{AbstractFloat,1} = ones(size(gal_pos,1))
-    rand_pos::Array{AbstractFloat,2} = Array{AbstractFloat}(undef,0,0)
-    rand_wts::Array{AbstractFloat,1} = ones(size(rand_pos,1))
+    gal_pos::Array{Float64,2}
+    gal_wts::Array{Float64,1} = ones(size(gal_pos,1))
+    rand_pos::Array{Float64,2} = Array{Float64}(undef,0,0)
+    rand_wts::Array{Float64,1} = ones(size(rand_pos,1))
 end
 
 @with_kw mutable struct MeshParams
@@ -38,7 +38,7 @@ end
 
 @with_kw mutable struct SphericalVoidParams
     radii::Array{Float64,1} = [0]  # void radii [Mpc/h] (calculated using galaxy density if 0)
-    min_dens_cut::Float64 = 0.3
+    min_dens_cut::Float64 = 0.2
     max_overlap_frac::Float64 = 0.
 end
 
