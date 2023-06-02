@@ -58,6 +58,6 @@ vf.vsf        # void size function (r, vsf)
 
 Run reconstruction and void finding direct from command line:
 ```
-julia [-t <n_threads>] --project=<path/to/directory> src/VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
+julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
 ```
 To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file.
