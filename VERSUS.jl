@@ -25,13 +25,15 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
     out_file = "output/" * fn
     @info "Writing void catalogue to file"
     if output_type == "fits"
-        data = Dict("positions" => void_cat.positions, "radii" => void_cat.radii)
+        data = [void_cat.positions[:,1],void_cat.positions[:,2],void_cat.positions[:,3],void_cat.radii]
+        colnames = ["x", "y", "z", "R"]
         f = FITS(out_file * ".fits", "w")
-        write(f, data)
+        write(f, colnames, data)
         close(f)
-        vsf = Dict("R" => void_cat.vsf[:,1], "N" => void_cat.vsf[:,2], "n" => void_cat.vsf[:,3], "rmean" => void_cat.vsf[:,4], "dn/dlnR" => void_cat.vsf[:,5])
+        vsf = [void_cat.vsf[:,1], void_cat.vsf[:,2], void_cat.vsf[:,3], void_cat.vsf[:,4], void_cat.vsf[:,5]]
+        colnames = ["R", "N", "n", "rmean", "dn/dlnR"]
         g = FITS(out_file * "_vsf.fits", "w")
-        write(g, vsf)
+        write(g, colnames, vsf)
         close(g)
     elseif output_type == "txt"
         writedlm(out_file * "_positions.txt",void_cat.positions)
