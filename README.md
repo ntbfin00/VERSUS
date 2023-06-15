@@ -60,4 +60,6 @@ Run reconstruction and void finding direct from command line:
 ```
 julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
 ```
+If randoms are supplied from command line, VERSUS will run in survey (not simulation box) mode.
+
 To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file.
