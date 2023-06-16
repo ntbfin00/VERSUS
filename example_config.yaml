@@ -23,7 +23,6 @@ mesh:
   mesh_fn:
   dtype:
   nbins_vf: 
-  is_box:
   padding:
   recon_alg:
   nbins_recon:

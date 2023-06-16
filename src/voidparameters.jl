@@ -24,7 +24,6 @@ end
     dtype::String = "f4"
     nbins_vf::Array{Int,1} = [0]  # number of bins for voidfinding (calculated using galaxy density if 0) 
                                   # [MUST GIVE THE SAME CELL RESOLUTION (LENGTH/NBINS) FOR EACH DIMENSION]
-    is_box::Bool = true
     padding::Float64 = 1.1  # survey (and reconstruction) padding factor
     save_mesh::Bool = true
     mesh_fn::String = ""  # defaults to mesh_<nbins_vf>_<dtype>.fits

@@ -55,6 +55,7 @@ s = ArgParseSettings()
     "--randoms"
         help = "random positions and weights"
         arg_type = String
+        default = nothing
     "--config"
         help = "configuration YAML file"
         required = true
@@ -133,7 +134,7 @@ end
 if build_mesh
     @info "Reading galaxy position data"
     gal_data = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
-    if mesh_settings.is_box
+    if args["randoms"] == nothing
         cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2])
     else
         @info "Reading randoms position data"

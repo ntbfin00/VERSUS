@@ -42,13 +42,16 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
         # number of bins per average galaxy separation
         f = 2
 
+        # number of randoms threshold used for selecting cells belonging to survey
+        threshold = nothing
+
         cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
         rec = set_recon_engine(cosmo_vf, cat, mesh, [0], 1.)[1]
         vol = prod(rec.boxsize)
         mean_dens = size(cat.gal_pos,1)/vol
         r_sep = (4 * pi * mean_dens / 3)^(-1/3)
 
-        if !mesh.is_box
+        if size(cat.rand_pos,1) != 0
             n_itr = 4
             rand_pos = PyObject(cat.rand_pos)
             rand_wts = PyObject(cat.rand_wts)
@@ -92,7 +95,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
 
         nbins = ceil.(Int, f * mesh.padding*rec.boxsize/r_sep)
 
-        return nbins, r_sep, vol
+        return nbins, r_sep, vol, threshold
 
 end
 
@@ -102,17 +105,13 @@ Initialise mesh and set algorithm for reconstruction.
 function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1}, pad::Float64)
     @debug "Initialising mesh"
 
-    if !mesh.is_box && size(cat.rand_pos,1) == 0
-        throw(ErrorException("is_box is set to false but no randoms have been supplied."))
-    end
-
     @debug "Setting mesh based on positions" nbins pad
-    if mesh.is_box
-        los = mesh.los
-        pos = PyObject(cat.gal_pos)
-    else 
+    if size(cat.rand_pos,1) != 0
         los = nothing
         pos = PyObject(cat.rand_pos)
+    else
+        los = mesh.los
+        pos = PyObject(cat.gal_pos)
     end
 
     # set the mesh
@@ -148,7 +147,7 @@ function compute_density_field(cat::Main.VoidParameters.GalaxyCatalogue, mesh::M
     gal_wts = PyObject(cat.gal_wts)
     rec.assign_data(gal_pos, gal_wts)
 
-    if !mesh.is_box
+    if size(cat.rand_pos,1) != 0
         @info "Assigning randoms to grid"
         rand_pos = PyObject(cat.rand_pos)
         rand_wts = PyObject(cat.rand_wts)
@@ -167,8 +166,8 @@ function reconstruction(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidPara
     
     @info "Performing density field reconstruction"
 
-    if !mesh.is_box && mesh.padding <= 1.0
-        @warn "Reconstructed positions may be wrapped back into survey region as is_box=false and padding<=1."
+    if size(cat.rand_pos,1) != 0 && mesh.padding <= 1.0
+        @warn "Reconstructed positions may be wrapped back into survey region as padding<=1."
     end
 
     # calculate default number of bins based on box_length and smoothing radius
@@ -203,7 +202,7 @@ end
 """
 Create density mesh from galaxy and random positions. Returns 3D density mesh, box length and box centre.
 """
-function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams)
+function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams; threshold = nothing)
 
     @info "Creating density mesh"
 
@@ -211,11 +210,12 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
     # other cosmological parameters are have no effect on mesh construction 
     cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
 
-    # no padding for voidfinding if box
-    if mesh.is_box
-        rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, 1.)[1]
-    else
+    # pad box if survey
+    if size(cat.rand_pos,1) != 0 
         rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, mesh.padding)[1]
+    else
+        rec = set_recon_engine(cosmo_vf, cat, mesh, mesh.nbins_vf, 1.)[1]
+        mask = nothing
     end
 
     # determine density on mesh
@@ -224,11 +224,8 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
     delta = rec.mesh_delta.value
 
     # compute survey mask for empty cells
-    if !mesh.is_box
-        threshold = 0.01 * sum(rec.mesh_randoms.value)/prod(mesh.nbins_vf)
+    if size(cat.rand_pos,1) != 0         
         mask = findall(q->(q <= threshold), rec.mesh_randoms.value)
-    else
-        mask = nothing
     end
 
     @debug "Check for NaN values in mesh " any_NaN = any(isnan, delta)

@@ -519,6 +519,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
 
         # reset survey mask
         if mask != nothing
+            @debug "Resetting survey mask" length(mask)
             delta_sm[mask] .= 0.
         end
 
@@ -629,12 +630,20 @@ Void finding with galaxy positions.
 """
 function voidfinder(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, par::Main.VoidParameters.SphericalVoidParams; fft_plan = nothing)
 
-    nbins, r_sep, vol = gal_dens_bin(cat, mesh)
+    box_like = (size(cat.rand_pos,1)==0)
+
+    if box_like
+        @info "VERSUS running on simulation box data"
+    else
+        @info "VERSUS running on survey-like data"
+    end
+
+    nbins, r_sep, vol, threshold = gal_dens_bin(cat, mesh)
     @info "Catalogue details:" r_sep vol
 
     # set default void radii to 3-10x mean galaxy separation
     if par.radii == [0]
-        par.radii = [10:-1:3;] * r_sep
+        par.radii = [10:-1:2;] * r_sep
         @info "Default radii set" par.radii
     end
     # set default number of bins based on galaxy density
@@ -643,9 +652,9 @@ function voidfinder(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPar
         @info "Default voidfinding bins set" mesh.nbins_vf
     end
 
-    delta, mask, box_length, box_centre = create_mesh(cat, mesh)
+    delta, mask, box_length, box_centre = create_mesh(cat, mesh; threshold = threshold)
 
-    voidfinder(delta, box_length, box_centre, par; fft_plan = fft_plan, bound_conds = mesh.is_box, volume = vol, mask = mask)
+    voidfinder(delta, box_length, box_centre, par; fft_plan = fft_plan, bound_conds = box_like, volume = vol, mask = mask)
 
 end
 
