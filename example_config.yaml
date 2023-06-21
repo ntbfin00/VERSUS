@@ -2,8 +2,6 @@ input:
   data_format:
   data_cols:
   build_mesh: 
-  box_length:        # calculated from data if build_mesh=true
-  box_centre:        # calculated from data if build_mesh=true
   do_recon:
   run_spherical_vf:
 

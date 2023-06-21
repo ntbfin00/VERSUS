@@ -78,21 +78,12 @@ if endswith(args["config"], ".yaml")
         do_recon = get(config["input"], "do_recon", false)
         run_spherical_vf = get(config["input"], "run_spherical_vf", true)
         build_mesh = get(config["input"], "build_mesh", true)
-        box_length = get(config["input"], "box_length", nothing)
-        box_centre = get(config["input"], "box_centre", nothing)
     else
         data_format = "xyz"
         data_cols = ["x","y","z"]
         do_recon = false
         run_spherical_vf = true
         build_mesh = true
-        box_length = nothing
-        box_centre = nothing
-    end
-
-    # check that box parameters have been provided if not building mesh
-    if !build_mesh && (isnothing(box_length) || isnothing(box_centre))
-        throw(ErrorException("build_mesh is set to false. Mesh has been provided without box_length or box_centre."))
     end
 
     if any(keys(config) .== "output")
@@ -143,7 +134,7 @@ if build_mesh
     end
 else
     @info "Reading density mesh"
-    mesh = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
+    mesh, box_length, box_centre = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
 end
 
 

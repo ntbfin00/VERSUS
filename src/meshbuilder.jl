@@ -44,6 +44,8 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
 
         # number of randoms threshold used for selecting cells belonging to survey
         threshold = nothing
+        # no padding for box
+        pad = 1.
 
         cosmo_vf = Main.VoidParameters.Cosmology(; bias=1.)
         rec = set_recon_engine(cosmo_vf, cat, mesh, [0], 1.)[1]
@@ -52,6 +54,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
         r_sep = (4 * pi * mean_dens / 3)^(-1/3)
 
         if size(cat.rand_pos,1) != 0
+            pad = mesh.padding
             n_itr = 4
             rand_pos = PyObject(cat.rand_pos)
             rand_wts = PyObject(cat.rand_wts)
@@ -93,7 +96,7 @@ function gal_dens_bin(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidP
             end
         end
 
-        nbins = ceil.(Int, f * mesh.padding*rec.boxsize/r_sep)
+        nbins = ceil.(Int, f * pad*rec.boxsize/r_sep)
 
         return nbins, r_sep, vol, threshold
 
@@ -243,8 +246,10 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         else
             fn = "mesh/" * mesh.mesh_fn * ".fits"
         end
+        data = Dict("box_length"=>rec.boxsize, "box_centre"=>rec.boxcenter);
         f = FITS(fn, "w")
         write(f, delta)
+        write(f, data)
         close(f)
         @info "$fn saved to file"
     end

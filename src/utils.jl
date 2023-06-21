@@ -122,13 +122,15 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
         if endswith(fn, ".fits")
             f = FITS(fn, "r")
             delta = read(f[1])
+            box_length = read(f[2], "box_length")
+            box_centre = read(f[2], "box_centre")
             close(f)
         # elseif any(endswith.(fn, hdf5_ext))
         else
             throw(ErrorException("Input file format not recognised. Allowed formats is .fits"))
         end
 
-        return delta 
+        return delta, box_length, box_centre
     end
 
 end
