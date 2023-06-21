@@ -62,4 +62,4 @@ julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml fi
 ```
 If randoms are supplied from command line, VERSUS will run in survey (not simulation box) mode.
 
-To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file and provide 3D mesh FITS file (primary HDU) in ```--data``` argument.
+To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file and provide FITS file (primary HDU: 3D mesh, secondary HDU: ```box_length``` and ```box_centre``` arrays)  in ```--data``` argument.
