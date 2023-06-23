@@ -228,7 +228,7 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
 
     # compute survey mask for empty cells
     if size(cat.rand_pos,1) != 0         
-        mask = findall(q->(q <= threshold), rec.mesh_randoms.value)
+        mask = [rec.mesh_randoms.value .<= threshold]
     end
 
     @debug "Check for NaN values in mesh " any_NaN = any(isnan, delta)
@@ -246,7 +246,7 @@ function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPa
         else
             fn = "mesh/" * mesh.mesh_fn * ".fits"
         end
-        data = Dict("box_length"=>rec.boxsize, "box_centre"=>rec.boxcenter);
+        data = Dict("box_length"=>rec.boxsize, "box_centre"=>rec.boxcenter)
         f = FITS(fn, "w")
         write(f, delta)
         write(f, data)

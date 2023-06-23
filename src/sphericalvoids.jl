@@ -520,7 +520,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
         # reset survey mask
         if mask != nothing
             @debug "Resetting survey mask" length(mask)
-            delta_sm[mask] .= 0.
+            delta_sm[mask...] .= 0.
         end
 
         # check if cells are below threshold
