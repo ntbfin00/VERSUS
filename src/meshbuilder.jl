@@ -105,7 +105,7 @@ end
 """
 Initialise mesh and set algorithm for reconstruction.
 """
-function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1}, pad::Float64)
+function set_recon_engine(cosmo::Main.VoidParameters.Cosmology, cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams, nbins::Array{Int,1}, pad)
     @debug "Initialising mesh"
 
     @debug "Setting mesh based on positions" nbins pad
@@ -207,7 +207,7 @@ Create density mesh from galaxy and random positions. Returns 3D density mesh, b
 """
 function create_mesh(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidParameters.MeshParams; threshold = nothing)
 
-    @info "Creating density mesh"
+    @info "Creating density mesh" mesh.nbins_vf
 
     # set bias=1 so voids are found in the galaxy field (not matter field)
     # other cosmological parameters are have no effect on mesh construction 
