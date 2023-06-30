@@ -4,7 +4,6 @@ version = "0.1.0"
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
-Cosmology = "76746363-e552-5dba-9a5a-cef6fa9cc5ab"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
