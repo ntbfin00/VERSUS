@@ -65,7 +65,7 @@ end
 args = parse_args(ARGS, s)
 
 # setup logging
-logger = setup_logging()
+logger = setup_logging("debug")
 
 # load settings
 if endswith(args["config"], ".yaml")
@@ -125,12 +125,17 @@ end
 if build_mesh
     @info "Reading galaxy position data"
     gal_data = read_input(args["data"], build_mesh, data_format, data_cols, cosmo)
-    if args["randoms"] == nothing
-        cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2])
-    else
+    cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2])
+    gal_data = nothing
+    GC.gc()
+
+    if args["randoms"] != nothing
         @info "Reading randoms position data"
         rand_data = read_input(args["randoms"], build_mesh, data_format, data_cols, cosmo)
-        cat = GalaxyCatalogue(gal_pos = gal_data[1], gal_wts = gal_data[2], rand_pos = rand_data[1], rand_wts = rand_data[2])
+        cat.rand_pos = rand_data[1]
+        cat.rand_wts = rand_data[2]
+        rand_data = nothing
+        GC.gc()
     end
 else
     @info "Reading density mesh"

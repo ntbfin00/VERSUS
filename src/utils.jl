@@ -7,6 +7,7 @@ using .VoidParameters
 using LoggingExtras
 using PyCall
 using FITSIO
+using Interpolations
 
 cosmology = pyimport("astropy.cosmology")
 utils = pyimport("pyrecon.utils")
@@ -36,6 +37,21 @@ function setup_logging(level::String = "info")
 end
 
 """
+Convert redshift to comoving radial distance.
+"""
+function z_to_dist(cosmo::Main.VoidParameters.Cosmology, z::Array{<:AbstractFloat,1})
+    @debug "Setting cosmology"
+    c = cosmology.LambdaCDM(H0=cosmo.h*100, Om0=cosmo.omega_m, Ode0=cosmo.omega_l)
+
+    @debug "Converting redshifts to distances"
+    z_arr = collect(minimum(z):0.01:maximum(z)+1)
+    dist = c.comoving_distance(z_arr)
+    fit = linear_interpolation(z_arr, dist)
+
+    return fit(z)
+end
+
+"""
 Convert sky positions and redshift to cartesian coordinates.
 """
 function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:AbstractFloat,2}; angle::String="degrees")
@@ -53,21 +69,13 @@ function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:Abstrac
         throw(ErrorException("Angle type must be either 'degrees' or 'radians'."))
     end
 
-    # compute distances from redshifts
-    @debug "Setting cosmology"
-    c = cosmology.LambdaCDM(H0=cosmo.h*100, Om0=cosmo.omega_m, Ode0=cosmo.omega_l)
-
-    @debug "Calculating comoving distances"
-    ra = pos[:,1]
-    dec = pos[:,2]
-    z = pos[:,3]
-    dist = c.comoving_distance(PyObject(z))
+    dist = z_to_dist(cosmo, pos[:,3])
 
     @debug "Converting to cartesian"
-    cos_dec = cos.(dec * conversion)
-    pos[:,1] = cos_dec .* cos.(ra * conversion)
-    pos[:,2] = cos_dec .* sin.(ra * conversion)
-    pos[:,3] = sin.(dec .* conversion)
+    cos_dec = cos.(pos[:,2] * conversion)
+    pos[:,3] = sin.(pos[:,2] .* conversion)
+    pos[:,2] = cos_dec .* sin.(pos[:,1] * conversion)
+    pos[:,1] = cos_dec .* cos.(pos[:,1] * conversion)
 
     dist .* pos
     
