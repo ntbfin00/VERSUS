@@ -36,7 +36,7 @@ end
 """
 Top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float32,res::AbstractFloat)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float32,res::Float32)
 
     @info "Smoothing density field with top-hat filter of radius=$R"
     
@@ -79,7 +79,7 @@ end
 """
 Parallelised top-hat smoothing of density field.
 """
-function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float32,res::AbstractFloat,threading::Bool)
+function smoothing(delta::Array{<:AbstractFloat,3},dims::Array{Int64,1},R::Float32,res::Float32,threading::Bool)
 
     @info "Smoothing density field with top-hat filter of radius=$R"
 
@@ -462,7 +462,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     r_bins = size(par.radii,1)
 
     # check grid resolution is the same along the axes 
-    res = box_length./dims
+    res = Float32.(box_length./dims)
     if isapprox(res[1], res[2]; atol=0.1) && isapprox(res[2], res[3]; atol=0.1)
         res = sum(res)/3
     else
@@ -473,7 +473,7 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     threshold = par.min_dens_cut - 1
 
     # sort radii from largest to smallest
-    Radii = sort(par.radii, rev=true)
+    Radii = Float32.(sort(par.radii, rev=true))
 
     # check Rmin is larger than grid resolution
     Rmin = Radii[end]
