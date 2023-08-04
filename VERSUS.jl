@@ -65,7 +65,7 @@ end
 args = parse_args(ARGS, s)
 
 # setup logging
-logger = setup_logging()
+logger = setup_logging("debug")
 
 # load settings
 if endswith(args["config"], ".yaml")

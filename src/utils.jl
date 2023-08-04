@@ -6,7 +6,7 @@ include("voidparameters.jl")
 using .VoidParameters
 using LoggingExtras
 using PyCall
-using FITSIO
+using CFITSIO
 using Interpolations
 
 cosmology = pyimport("astropy.cosmology")
@@ -81,6 +81,11 @@ function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:Abstrac
     
 end
 
+function mem()
+    println(Sys.free_memory()/Sys.total_memory())
+end
+
+
 """
 Read input data and randoms FITS files. Sky positions are converted to cartesian positions.
 """
@@ -91,19 +96,23 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
     # if galaxies/randoms are supplied as input
     if build_mesh
         if endswith(fn, ".fits")
-            f = FITS(fn, "r")
-            N = read_header(f[2])["NAXIS2"]
-            pos = Array{AbstractFloat}(undef,N,3)
-            wts = Array{AbstractFloat}(undef,N)
+            mem()
+            f = fits_open_data(fn)
+            mem()
+            N = parse(Int,fits_read_keyword(f,"NAXIS2")[1])
+            pos = Array{Float32}(undef,N,3)
+            wts = Array{Float32}(undef,N)
+            mem()
             for (i,col) in enumerate(data_cols)
                 if i<4
-                    pos[:,i] = read(f[2], col)
+                    fits_read_col(f,i,1,1,wts)
+                    pos[:,i] = wts
                 else
                     wts_supplied = 1
-                    wts = read(f[2], col)
+                    fits_read_col(f,i,1,1,wts)
                 end
             end
-            close(f)
+            fits_close_file(f)
         # elseif any(endswith.(fn, hdf5_ext))
         else
             throw(ErrorException("Input file format not recognised. Allowed format is .fits"))
