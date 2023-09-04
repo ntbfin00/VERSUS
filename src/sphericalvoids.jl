@@ -595,7 +595,8 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
         vsf[i,2] = Nvoids[i]
         vsf[i,3] = Nvoids[i]/volume
         vsf[i,4] = 0.5 * (r[i] + r[i+1])  # mean(R)
-        vsf[i,5] = (Nvoids[i] - Nvoids[i+1])/(volume * (r[i] - r[i+1]))  # dn/dlnR
+        # vsf[i,5] = (Nvoids[i] - Nvoids[i+1])/(volume * (r[i] - r[i+1]))  # dn/dlnR
+        vsf[i,5] = Nvoids[i]/(volume * log(r[i]/r[i+1]))  # dn/dlnR
     end
 
     box_shift = box_centre .- box_length/2
@@ -625,9 +626,10 @@ function voidfinder(cat::Main.VoidParameters.GalaxyCatalogue, mesh::Main.VoidPar
     nbins, r_sep, vol, threshold = gal_dens_bin(cat, mesh)
     @info "Catalogue details:" r_sep vol
 
-    # set default void radii to 3-10x mean galaxy separation
+    # set default void radii to 2-10x mean galaxy separation
     if par.radii == [0]
-        par.radii = [10:-1:2;] * r_sep
+        # par.radii = [10:-1:2;] * r_sep
+        par.radii = 10 .^ [1:-0.05:0.3;] * r_sep
         @info "Default radii set" 
     end
     # set default number of bins based on galaxy density
