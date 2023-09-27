@@ -81,9 +81,9 @@ function to_cartesian(cosmo::Main.VoidParameters.Cosmology, pos::Array{<:Abstrac
     
 end
 
-function mem()
-    println(Sys.free_memory()/Sys.total_memory())
-end
+#function mem()
+#    println(Sys.free_memory()/Sys.total_memory())
+#end
 
 
 """
@@ -96,13 +96,13 @@ function read_input(fn::String, build_mesh::Bool, data_format::String, data_cols
     # if galaxies/randoms are supplied as input
     if build_mesh
         if endswith(fn, ".fits")
-            mem()
+            #mem()
             f = fits_open_data(fn)
-            mem()
+            #mem()
             N = parse(Int,fits_read_keyword(f,"NAXIS2")[1])
             pos = Array{Float32}(undef,N,3)
             wts = Array{Float32}(undef,N)
-            mem()
+            #mem()
             for (i,col) in enumerate(data_cols)
                 if i<4
                     fits_read_col(f,i,1,1,wts)
