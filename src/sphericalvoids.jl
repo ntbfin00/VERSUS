@@ -495,7 +495,8 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     IDs = Array{Int64}(undef,cells_total)  # underdense cell IDs
 
     Nvoids = zeros(Int32,r_bins)
-    vsf = Array{Float32}(undef,r_bins,5)
+    # vsf = Array{Float32}(undef,r_bins,5)
+    vsf = Array{Float32}(undef,r_bins-1,3)
 
     voids_total::Int32 = 0  # total number of voids found
     expected_filling_frac::Float32 = 0.0
@@ -588,15 +589,14 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
 
     # compute the void size function (# of voids/Volume/dR)
     @info "Computing the void size function"
-    @inbounds for i = 1:r_bins
-        r = vcat(Radii, 0)
-        Nvoids = vcat(Nvoids, 0)
-        vsf[i,1] = r[i]
-        vsf[i,2] = Nvoids[i]
-        vsf[i,3] = Nvoids[i]/volume
-        vsf[i,4] = 0.5 * (r[i] + r[i+1])  # mean(R)
-        # vsf[i,5] = (Nvoids[i] - Nvoids[i+1])/(volume * (r[i] - r[i+1]))  # dn/dlnR
-        vsf[i,5] = Nvoids[i]/(volume * log(r[i]/r[i+1]))  # dn/dlnR
+    # vsf[:,1] = Radii
+    # vsf[:,2] = Nvoids
+    # vsf[:,3] = Nvoids/volume  # n=N/V
+    @inbounds for i = 1:r_bins-1
+	      norm = volume * log(Radii[i]/Radii[i+1])
+        vsf[i,1] = 0.5 * (Radii[i] + Radii[i+1])  # mean(R)
+        vsf[i,2] = Nvoids[i+1]/norm  # dn/dlnR
+	      vsf[i,3] = sqrt(Nvoids[i+1])/norm  # Poisson uncertainty
     end
 
     box_shift = box_centre .- box_length/2
