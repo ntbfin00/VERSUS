@@ -593,10 +593,10 @@ function voidfinder(delta::Array{<:AbstractFloat,3}, box_length::Array{<:Abstrac
     # vsf[:,2] = Nvoids
     # vsf[:,3] = Nvoids/volume  # n=N/V
     @inbounds for i = 1:r_bins-1
-	      norm = volume * log(Radii[i]/Radii[i+1])
+	norm = volume * log(Radii[i]/Radii[i+1])
         vsf[i,1] = 0.5 * (Radii[i] + Radii[i+1])  # mean(R)
         vsf[i,2] = Nvoids[i+1]/norm  # dn/dlnR
-	      vsf[i,3] = sqrt(Nvoids[i+1])/norm  # Poisson uncertainty
+	vsf[i,3] = sqrt(Nvoids[i+1])/norm  # Poisson uncertainty
     end
 
     box_shift = box_centre .- box_length/2
