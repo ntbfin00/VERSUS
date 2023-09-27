@@ -30,8 +30,8 @@ function save_void_cat(fn::String, output_type::String, void_cat::Main.Spherical
         f = FITS(out_file * ".fits", "w")
         write(f, colnames, data)
         close(f)
-        vsf = [void_cat.vsf[:,1], void_cat.vsf[:,2], void_cat.vsf[:,3], void_cat.vsf[:,4], void_cat.vsf[:,5]]
-        colnames = ["R", "N", "n", "rmean", "dn/dlnR"]
+	vsf = [void_cat.vsf[:,1], void_cat.vsf[:,2], void_cat.vsf[:,3]]
+        colnames = ["rmean", "dn/dlnR", "err"]
         g = FITS(out_file * "_vsf.fits", "w")
         write(g, colnames, vsf)
         close(g)
