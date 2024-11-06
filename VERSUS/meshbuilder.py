@@ -1,0 +1,298 @@
+import numpy as np
+import os
+from astropy.io import fits
+import logging
+
+logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+
+# @cython.cclass
+class DensityMesh:
+    r"""                                                                                                                                          
+    Generate density mesh from galaxy and random positions. 
+
+    Parameters
+    ----------
+    data_positions: array (N), string
+        Array of data positions (in cartesian or sky coordinates) or path to such positions.
+
+    data_weights: array (N,3), default=None
+        Array of data weights.
+
+    random_positions: array (N,3), string
+        Array of random positions (in cartesian or sky coordinates) or path to such positions.
+
+    random_weights: array (N), default=None
+        Array of random weights.
+
+    data_cols: list, default=None
+        List of data/random position column headers. Fourth element is taken as the weights (if present). Defaults to ['RA','DEC','Z'] if randoms are provided and ['X','Y','Z'] if not.
+
+    kwargs : dict
+        Optional arguments.
+    """
+
+    def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, data_cols=None):
+        # if randoms are supplied then treat as survey
+        self.box_like = True if random_positions is None else False
+        logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
+        # default options to read data column headers
+        if data_cols is None:
+            data_cols = ['X','Y','Z'] if self.box_like else ['RA','DEC','Z']
+        # load positions from file
+        if type(data_positions) is str: 
+            self.data_positions, self.data_weights = _load_data(data_positions, data_cols)
+        # load positions from array
+        else:
+            self.data_positions = data_positions
+            self.data_weights = data_weights
+        self.N_data = len(data_positions)  # total galaxies 
+        self.W_data = self.N_data if data_weights is None else np.array(data_weights).sum()  # sum of galaxy weights
+        # load randoms from file
+        if type(random_positions) is str:
+            self.random_positions, self.random_weights = _load_data(random_positions, data_cols)
+        else:
+            self.random_positions = random_positions
+            self.random_weights = random_weights
+        self.N_random = None if random_positions is None else len(random_positions)  # total randoms
+        self.W_random = self.N_random if random_weights is None else np.array(random_weights).sum()  # sum of random weights
+
+
+    def _load_data(data_fn, data_cols, z_to_dist=None, **kwargs):
+        r"""
+        Load galaxy or random positions from FITS file
+
+        Parameters
+        ----------
+        data_fn: string
+            Path to data.
+
+        data_cols: list
+            Positions (cartesian 'xyz' or sky 'rdz') column headers to read. Fourth column (if included) should correspond to data weights.
+
+        z_to_dist: callable
+            Callable that provides distance as a function of redshift.
+
+        kwargs:
+            Additional arguments for pyrecon.sky_to_cartesian
+        """
+
+        f = fits.open(data_fn)
+        N = f[1].header['NAXIS2']
+        positions = np.zeros(N, 3)
+        weights = None
+        logger.info(f'Loading positions from file with column headers {data_cols}.')
+        for (i,c) in enumerate(data_cols):
+            # read weights if 4th column provided
+            if i<3: 
+                positions[:,i] = f[1].data[c]
+            else:
+                weights = f[1].data[c]
+        f.close()
+
+        # if x or y contained in data_cols assume positions are provided in cartesian coordinates
+        # else convert sky positions to cartesian
+        if not np.array([a in data_cols for a in ('X','Y','x','y')]).any():
+            logger.info('Converting sky positions to cartesian.')
+            from pyrecon.utils import sky_to_cartesian
+            # use LambdaCDM as default redshift to distance conversion
+            if z_to_dist is None:
+                from astropy.cosmology import LambdaCDM
+                cosmo = LambdaCDM(H0=67.6, Om0=0.31, Ode0=0.69)
+                positions[:,2] = cosmo.comoving_distance(positions[:,2])
+            else:
+                positions[:,2] = z_to_dist(positions[:,2])
+            # convert sky positions
+            positions = sky_to_cartesian(positions[:,2], *positions[:,:2], **kwargs)
+
+        return positions, weights
+
+
+    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1.1, **kwargs):
+        r"""
+        Set the mesh properties and type of reconstruction algorithm
+
+        Parameters
+        ----------
+        engine: string
+            Reconstruction algorithm passed to pyrecon.
+
+        cellsize: float, default=1.
+            Size of mesh cell.
+
+        boxpad: float, default=1.1
+            Padding applied to mesh.
+        """
+        self.engine = engine
+
+        # use galaxies (or randoms for survey) to estimate boxsize if not supplied
+        positions = self.data_positions if self.box_like else self.random_positions
+        boxsize, boxcenter = (None, None)
+
+        # select reconstruction algorithm
+        exec(f"from pyrecon import {engine}; Recon = {engine}", globals())
+
+        # initialise mesh
+        mesh = Recon(positions=positions, boxsize=boxsize, boxcenter=boxcenter, cellsize=cellsize, boxpad=boxpad, **kwargs)
+
+        return mesh
+
+    def _set_mesh_density(self, mesh, smoothing_radius=0., **kwargs):
+        r"""
+        Populate mesh with galaxies and randoms
+
+        Parameters
+        ----------
+        mesh: pyrecon.recon.BaseReconstruction object
+            Input density mesh.
+            
+        smoothing_radius : float, default=0.
+            Gaussian radius as factor of cellsize with which to smooth data and random fields before computing overdensity.
+        """
+
+        # assign data
+        mesh.assign_data(self.data_positions, self.data_weights)
+        # assign randoms
+        if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
+
+        # save data and randoms otherwise deleted by Pyrecon
+        self.mesh_data = mesh.mesh_data
+        self.mesh_randoms = mesh.mesh_randoms
+
+        # manually apply smoothing
+        if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
+            mesh.mesh_data.smooth_gaussian(smoothing_radius * self.cellsize)
+            if not self.box_like: mesh.mesh_randoms.smooth_gaussian(smoothing_radius * self.cellsize)
+
+        # calculate mesh overdensity
+        mesh.set_density_contrast(**kwargs)
+
+        # return mesh
+
+
+    # def reconstruct(self, f, engine='IterativeFFTReconstruction', los='z', recon_pad=1.1, **kwargs):
+        # r"""
+        # Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
+        # """
+
+        # self.data_mesh = _set_mesh(cellsize=cellsize, engine=engine, boxpad=recon_pad, **kwargs)
+        
+        # if not self.box_like: self.data_mesh.los = los  # survey has local line-of-sight
+
+        
+    def size_mesh(self, niterations=4, cells_per_r_sep=2, smoothing_radius=0., **kwargs):
+        r"""
+        Estimate the survey volume, mean density and average galaxy separation.
+
+        Parameters
+        ----------
+        niterations : int, default=4
+            Number of iterations used to estimate the average galaxy separation.
+
+        cells_per_r_sep : float, default=2.
+            Number of cells used in size estimation as a fraction of the average galaxy separation.
+
+        smoothing_radius : float, default=0.
+            Gaussian radius as factor of cellsize with which to smooth data and random fields before computing overdensity.
+
+        ran_min : float, default=0.01
+            Minimum fraction of average randoms for cell to be counted as part of survey.
+
+        kwargs : dict
+            Optional arguments for pyrecon.set_density_contrast().
+        """
+
+        logger.info('Estimating volume and average galaxy separation')
+        # create mesh flush with survey volume
+        mesh = self._set_mesh(boxpad=1.)
+        # first estimate of volume (true if box)
+        self.volume = np.prod(mesh.boxsize)
+        # first estimate of mean density
+        self.rho_mean = self.W_data / self.volume
+        # first estimate of average separation between galaxies
+        self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)  
+
+        # iterate for better estimate of survey volume
+        if not self.box_like:
+            for i in range(niterations):
+                logger.debug(f'Iteration {i} of volume estimation')
+                # set cellsize to half estimated galaxy separation
+                self.cellsize = self.r_sep/cells_per_r_sep
+                mesh = self._set_mesh(boxpad=1., cellsize=self.cellsize, bias=1.)
+                # determine survey boundary (cells outside have delta=0.)
+                self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs)
+                survey_mask = mesh.mesh_delta.value != 0.
+                # estimate survey volume
+                self.volume = survey_mask.sum() * mesh.cellsize.prod()
+                # estimate density using cells inside survey
+                self.rho_mean = (self.W_data/self.W_random) * self.mesh_randoms.value[survey_mask]
+                self.rho_mean = self.rho_mean.mean() / mesh.cellsize.prod()  # must scale by cellsize
+                # estimate average galaxy separation
+                self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
+        del self.mesh_data, self.mesh_randoms
+        self.cellsize = self.r_sep/cells_per_r_sep
+        logger.info(f'Cellsize set to {self.cellsize:.2f} ({cells_per_r_sep:.1f} cells per average separation)') 
+
+        
+    def create_mesh(self, boxpad=1.1, cells_per_r_sep=2., smoothing_radius=0., save_mesh=None, **kwargs):
+        r"""
+        Create the density mesh
+
+        Parameters
+        ----------
+        pad : float, default=1.1
+            Padding factor for survey mesh. Simulation box has no padding.
+
+        cells_per_r_sep: float, default=2.
+            Number of mesh cells per average galaxy separation. Used to set cellsize.
+
+        smoothing_radius : float, default=0.
+            Smoothing scale for random field.
+
+        ran_min : float, default=0.01
+            Minimum fraction of average randoms for cell to be counted as part of survey.
+
+        save_mesh : bool, string, default=None
+            If not ``None``, path where to save the mesh in FITS format.
+            If ``True``, the mesh will be saved in the default path: f'mesh/mesh_<nbins_vf>_<dtype>.fits'.
+
+        kwargs : dict
+            Optional arguments.
+        """
+
+        # estimate cellsize based on galaxy density
+        if not hasattr(self, 'cellsize'): self.size_mesh(cells_per_r_sep=cells_per_r_sep, smoothing_radius=smoothing_radius, **kwargs)
+
+        # generate mesh
+        mesh = self._set_mesh(cellsize=self.cellsize,
+                              boxpad=1. if self.box_like else boxpad, 
+                              wrap=True if self.box_like else False,
+                              bias=1.)  # bias set to 1. so voids are found on galaxy (not matter) field
+
+        logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
+        self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 
+        del self.data_positions
+        del self.data_weights
+        del self.random_positions
+        del self.random_weights
+
+        self.delta = mesh.mesh_delta.value
+
+        # save mesh to FITS file
+        if save_mesh:
+            # save mesh in default path
+            if type(save_mesh) is bool:
+                if not os.path.isdir('mesh'): os.mkdir('mesh')  # create /mesh directory
+                axes = ['nx','ny','nz']
+                nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(mesh.nmesh))
+                save_mesh = os.path.join('mesh', f'mesh_{nbins}_{dtype[0]}{dtype[-2:]}')
+            # delta mesh
+            delta_hdu = fits.PrimaryHDU(self.delta)
+            # cellsize
+            cellsize_hdu = fits.ImageHDU(data=[self.cellsize], name='cellsize')
+            # save
+            logger.info(f'Saving density mesh to {save_mesh}.fits')
+            hdul = fits.HDUList([delta_hdu, cellsize_hdu])
+            hdul.writeto(f'{save_mesh}.fits', overwrite=True)
+            hdul.close()
+
