@@ -4,7 +4,6 @@ from astropy.io import fits
 import logging
 
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
 
 # @cython.cclass
 class DensityMesh:
@@ -28,37 +27,41 @@ class DensityMesh:
     data_cols: list, default=None
         List of data/random position column headers. Fourth element is taken as the weights (if present). Defaults to ['RA','DEC','Z'] if randoms are provided and ['X','Y','Z'] if not.
 
+    dtype: string
+        Mesh data type.
+
     kwargs : dict
         Optional arguments.
     """
 
-    def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, data_cols=None):
+    def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, data_cols=None, dtype='f4'):
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
         logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
+        self.dtype = dtype
         # default options to read data column headers
         if data_cols is None:
             data_cols = ['X','Y','Z'] if self.box_like else ['RA','DEC','Z']
         # load positions from file
         if type(data_positions) is str: 
-            self.data_positions, self.data_weights = _load_data(data_positions, data_cols)
+            self.data_positions, self.data_weights = self._load_data(data_positions, data_cols)
         # load positions from array
         else:
             self.data_positions = data_positions
             self.data_weights = data_weights
-        self.N_data = len(data_positions)  # total galaxies 
+        self.N_data = len(self.data_positions)  # total galaxies 
         self.W_data = self.N_data if data_weights is None else np.array(data_weights).sum()  # sum of galaxy weights
         # load randoms from file
         if type(random_positions) is str:
-            self.random_positions, self.random_weights = _load_data(random_positions, data_cols)
+            self.random_positions, self.random_weights = self._load_data(random_positions, data_cols)
         else:
             self.random_positions = random_positions
             self.random_weights = random_weights
-        self.N_random = None if random_positions is None else len(random_positions)  # total randoms
+        self.N_random = None if random_positions is None else len(self.random_positions)  # total randoms
         self.W_random = self.N_random if random_weights is None else np.array(random_weights).sum()  # sum of random weights
 
 
-    def _load_data(data_fn, data_cols, z_to_dist=None, **kwargs):
+    def _load_data(self, data_fn, data_cols, z_to_dist=None, **kwargs):
         r"""
         Load galaxy or random positions from FITS file
 
@@ -79,7 +82,7 @@ class DensityMesh:
 
         f = fits.open(data_fn)
         N = f[1].header['NAXIS2']
-        positions = np.zeros(N, 3)
+        positions = np.zeros((N, 3))
         weights = None
         logger.info(f'Loading positions from file with column headers {data_cols}.')
         for (i,c) in enumerate(data_cols):
@@ -133,7 +136,8 @@ class DensityMesh:
         exec(f"from pyrecon import {engine}; Recon = {engine}", globals())
 
         # initialise mesh
-        mesh = Recon(positions=positions, boxsize=boxsize, boxcenter=boxcenter, cellsize=cellsize, boxpad=boxpad, **kwargs)
+        mesh = Recon(positions=positions, boxsize=boxsize, boxcenter=boxcenter, 
+                     cellsize=cellsize, boxpad=boxpad, dtype=self.dtype, **kwargs)
 
         return mesh
 
@@ -155,9 +159,9 @@ class DensityMesh:
         # assign randoms
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
-        # save data and randoms otherwise deleted by Pyrecon
-        self.mesh_data = mesh.mesh_data
-        self.mesh_randoms = mesh.mesh_randoms
+        # # save data and randoms otherwise deleted by Pyrecon
+        # self.mesh_data = mesh.mesh_data
+        # self.mesh_randoms = mesh.mesh_randoms
 
         # manually apply smoothing
         if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
@@ -202,7 +206,7 @@ class DensityMesh:
             Optional arguments for pyrecon.set_density_contrast().
         """
 
-        logger.info('Estimating volume and average galaxy separation')
+        logger.info(f'Estimating volume and average galaxy separation (Ngal = {self.N_data})')
         # create mesh flush with survey volume
         mesh = self._set_mesh(boxpad=1.)
         # first estimate of volume (true if box)
@@ -229,7 +233,7 @@ class DensityMesh:
                 self.rho_mean = self.rho_mean.mean() / mesh.cellsize.prod()  # must scale by cellsize
                 # estimate average galaxy separation
                 self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
-        del self.mesh_data, self.mesh_randoms
+        # del self.mesh_data, self.mesh_randoms
         self.cellsize = self.r_sep/cells_per_r_sep
         logger.info(f'Cellsize set to {self.cellsize:.2f} ({cells_per_r_sep:.1f} cells per average separation)') 
 
@@ -277,6 +281,9 @@ class DensityMesh:
         del self.random_weights
 
         self.delta = mesh.mesh_delta.value
+        self.nmesh = mesh.nmesh
+        self.boxsize = mesh.boxsize
+        self.boxcenter = mesh.boxcenter
 
         # save mesh to FITS file
         if save_mesh:
@@ -285,14 +292,17 @@ class DensityMesh:
                 if not os.path.isdir('mesh'): os.mkdir('mesh')  # create /mesh directory
                 axes = ['nx','ny','nz']
                 nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(mesh.nmesh))
-                save_mesh = os.path.join('mesh', f'mesh_{nbins}_{dtype[0]}{dtype[-2:]}')
+                save_mesh = os.path.join('mesh', f'mesh_{nbins}_{self.dtype}')
             # delta mesh
             delta_hdu = fits.PrimaryHDU(self.delta)
             # cellsize
             cellsize_hdu = fits.ImageHDU(data=[self.cellsize], name='cellsize')
+            boxsize_hdu = fits.ImageHDU(data=self.boxsize, name='boxsize')
+            boxcenter_hdu = fits.ImageHDU(data=self.boxcenter, name='boxcenter')
+            boxlike_hdu = fits.ImageHDU(data=[int(self.box_like)], name='box_like')
             # save
             logger.info(f'Saving density mesh to {save_mesh}.fits')
-            hdul = fits.HDUList([delta_hdu, cellsize_hdu])
+            hdul = fits.HDUList([delta_hdu, cellsize_hdu, boxlike_hdu])
             hdul.writeto(f'{save_mesh}.fits', overwrite=True)
             hdul.close()
 
