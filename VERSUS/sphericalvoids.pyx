@@ -8,7 +8,6 @@ cimport cython
 from cython.parallel import prange, parallel
 from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
 import logging
-
 cimport void_openmp_library as VOL
 
 logger = logging.getLogger(__name__)
@@ -59,7 +58,7 @@ cdef class SphericalVoids:
     cdef int threads
     cdef public float[:,::1] void_position
     cdef public float[::1] void_radius
-    cdef public float[:,:,::1] void_vsf
+    cdef public float[:,::1] void_vsf
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
@@ -107,7 +106,8 @@ cdef class SphericalVoids:
         """
 
         f = fits.open(mesh_fn)
-        self.delta = f[0].data
+        # self.delta = f[0].data
+        self.delta = f[0].data.byteswap().newbyteorder()
         self.nmesh = f[0].data.shape
         self.cellsize = f['cellsize'].data
         self.boxsize = f['boxsize'].data
@@ -195,26 +195,20 @@ cdef class SphericalVoids:
         cdef np.float32_t[::1] kkx, kky, kkz
         cdef np.complex64_t[:,:,::1] delta_k
         
-        # cdef int kxx, kyy, kzz, kx, ky, kz, kx2, ky2, kz2
-        # cdef int middle = self.nmesh[2]//2
-
         xdim, ydim, zdim = self.nmesh
         # compute FFT of field
-        # delta_k = utils.FFT3Dr_f(self.delta, self.threads)
         delta_k = self.FFT3Dr()
 
         # loop over Fourier modes
         logger.debug('Looping over fourier modes')
-        kkx = np.fft.rfftfreq(xdim, self.cellsize).astype('f4')**2
+        kkx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')**2
         kky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')**2
-        kkz = np.fft.fftfreq(zdim, self.cellsize).astype('f4')**2
-        # xdim = kkx.size; ydim = kky.size, zdim = kkz.size 
-        # print(xdim, ydim, zdim)
+        kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
 
         prefact = 2.0 * np.pi * radius
-        for k in prange(zdim, nogil=True):
+        for i in prange(xdim, nogil=True):
             for j in range(ydim):
-                for i in range(xdim//2 + 1):
+                for k in range(zdim//2 + 1):
 
                     # skip when kx, ky and kz equal zero
                     if i==0 and j==0 and k==0:
@@ -226,30 +220,6 @@ cdef class SphericalVoids:
                     else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
                     delta_k[i,j,k] =  fact * delta_k[i,j,k]
 
-        # for kxx in prange(zdim, nogil=True):
-            # kx  = (kxx-zdim if (kxx>middle) else kxx)
-            # kx2 = kx*kx
-            
-            # for kyy in range(ydim):
-                # ky  = (kyy-ydim if (kyy>middle) else kyy)
-                # ky2 = ky*ky
-                
-                # for kzz in range(middle+1): #kzz=[0,1,..,middle] --> kz>0
-                    # kz  = (kzz-xdim if (kzz>middle) else kzz)
-                    # kz2 = kz*kz
-
-                    # if kxx==0 and kyy==0 and kzz==0:
-                        # continue
-
-                    # # compute the value of |k|
-                    # kR = prefact*sqrt(kx2 + ky2 + kz2)
-                    # if fabs(kR)<1e-5:  fact = 1.0
-                    # else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
-                    # delta_k[kxx,kyy,kzz] = delta_k[kxx,kyy,kzz]*fact
-
-        # import Pk_library as PKL
-        # logger.debug('IFFT with pylians')
-        # delta_sm = PKL.IFFT3Dr_f(delta_k, self.threads)
         delta_sm = self.IFFT3Dr(delta_k)
 
         # reset survey mask
@@ -259,14 +229,15 @@ cdef class SphericalVoids:
 
         return delta_sm
 
+
     def _sort_radii(self, float[:] radii):
         return np.sort(radii)[::-1]
 
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    cdef inline long[::1] _find_underdensities(self, np.float32_t[:,:,::1] delta_sm, char[:,:,::1] in_void, float[::1] delta_v, long[::1] IDs, 
-                                               int xdim, int ydim, int zdim, int yzdim):
+    cdef inline long[::1] _find_underdensities(self, float[:,:,::1] delta_sm, char[:,:,::1] in_void, float[::1] delta_v, long[::1] IDs, 
+                                               int xdim, int ydim, int zdim, int yzdim, long *local_voids):
         r"""
         Find underdense cells and sort them from lowest density.
 
@@ -282,47 +253,35 @@ cdef class SphericalVoids:
         IDs: array
             Array to store void ID numbers.
         """
-        cdef long local_voids
+        # cdef long local_voids=0
         cdef long[::1] indices, IDs_sort#, IDs
         cdef int i,j,k
         # cdef float[::1] delta_v#, delta_v_temp
 
-        logger.debug('Looping through voids and assigning IDs')
-        local_voids = 0
+        logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and assigning IDs')
         for k in range(zdim):
             for j in range(ydim):
                 for i in range(xdim):
 
                     if delta_sm[i,j,k]<self.void_delta and in_void[i,j,k]==0:
-                        IDs[local_voids] = yzdim*i + zdim*j + k
-                        delta_v[local_voids] = self.delta[i,j,k]
-                        local_voids += 1
+                        IDs[local_voids[0]] = yzdim*i + zdim*j + k
+                        delta_v[local_voids[0]] = delta_sm[i,j,k]
+                        local_voids[0] += 1
 
-        logger.info(f'Found {local_voids} cells with delta < {self.void_delta:.2f}')
+        logger.debug(f'Found {local_voids[0]} cells with delta < {self.void_delta:.2f}')
 
         # sort delta_v by density
-        indices = np.argsort(delta_v[:local_voids])
-        # # this is just delta_v = delta_v[indexes]
-        # delta_v_temp = np.empty(local_voids, dtype=np.float32)
-        # for i in range(local_voids):
-            # delta_v_temp[i] = delta_v[indexes[i]]
-        # for i in range(local_voids):
-            # delta_v[i] = delta_v_temp[i]
-        # del delta_v_temp
-
+        indices = np.argsort(delta_v[:local_voids[0]])
         # sort IDs by density
-        # this is just IDs = IDs[indices]
-        IDs_sort = np.empty(local_voids, dtype=np.int64) 
-        for i in range(local_voids):
+        IDs_sort = np.empty(local_voids[0], dtype=np.int64) 
+        for i in range(local_voids[0]):
             IDs_sort[i] = IDs[indices[i]]
-        # for i in range(local_voids):
-            # IDs[i] = IDs_sort[i]
-        # del IDs_sort
+        for i in range(local_voids[0]):
+            IDs[i] = IDs_sort[i]
+        del IDs_sort
         logger.debug('Sorting of underdense cells finished.')
 
-        # return IDs
-        return IDs_sort
-
+        return IDs
 
 ####################################################################
     # cdef inline _periodic_bounds(self, int dd, int dim, int lower, int upper):
@@ -492,12 +451,10 @@ cdef class SphericalVoids:
 ####################################################################
 
 
-
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, list radii=[0.],#=np.array([0.], dtype=np.float32),#np.zeros(1, dtype=np.float32), 
-            float void_delta=-0.8, float void_overlap=0., int threads=0):
+    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, float void_overlap=0., int threads=0):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -515,23 +472,30 @@ cdef class SphericalVoids:
         """
 
         cdef float[:] Radii=np.array(radii, dtype=np.float32)
-        cdef int nmesh_tot=np.prod(self.nmesh), threads2#, bins=radii.size
-        cdef float vol_mesh, vol_void, nearby_voids#, Rmin=np.min(radii) 
-        cdef long max_num_voids
-        cdef int[:,::1] void_pos
-        cdef float[:,::1] position
-        cdef float[::1] void_radius, box_shift
+        cdef float R, R_grid, R_grid2, Rmin
+        cdef int bins, Ncells, nearby_voids, threads2 
+        cdef long nmesh_tot=np.prod(self.nmesh)
+        cdef long max_num_voids, voids_found, total_voids_found, ID
+        cdef float vol_mesh, vol_void, norm
+        cdef float[:,:,::1] delta_sm
         cdef char[:,:,::1] in_void
-        cdef float[::1] delta_v, delta_v_temp
         cdef long[::1] IDs
-        cdef long total_voids_found
-        cdef int i, j, k, p, q, xdim, ydim, zdim, yzdim
+        cdef int i, j, k, p, q, xdim, ydim, zdim, yzdim, mode
         cdef int[::1] Nvoids
         cdef double void_cell_fraction, void_volume_fraction=0.0
+        cdef float[:,::1] position
+        cdef int[:,::1] void_pos
+        cdef float[::1] delta_v, void_rad, box_shift
+        cdef float[:,::1] vsf
+
+        cdef long local_voids
+        cdef long[::1] indexes, IDs_temp
+        cdef float[::1] delta_v_temp
+        cdef int dims, dims2
 
         # set default radii if not provided
         if radii[0] == 0.:
-            self.Radii = 10**np.arange(1, 0.3, -0.05) * self.cellsize  # ~2-10x cellsize in logarithmic spacing
+            self.Radii = 10**np.arange(1, 0.3, -0.05, dtype=np.float32) * self.cellsize  # ~2-10x cellsize in logarithmic spacing
             # self.Radii = np.arange(104,1,-20, dtype=np.float32) * self.cellsize  # 4-104x cellsize
             logger.debug(f'Radii set by default')
         else:
@@ -563,11 +527,13 @@ cdef class SphericalVoids:
         # determine non-overlapping volume of smallest void
         vol_void = (1 - self.void_overlap) * 4 * np.pi * Rmin**3 / 3
         # determine maximum possible number of voids
-        max_num_voids = int(vol_void / vol_mesh)
+        max_num_voids = int(vol_mesh / vol_void)
+        logger.debug(f"Total mesh cells = {nmesh_tot:d} ({xdim},{ydim},{zdim})")
+        logger.debug(f"Maximum number of voids = {max_num_voids:d}")
 
         # define arrays containing void positions and radii
         void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
-        void_radius = np.zeros(max_num_voids,      dtype=np.float32)
+        void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
 
         # define the in_void and delta_v array
         in_void = np.zeros(self.nmesh, dtype=np.int8)
@@ -576,7 +542,7 @@ cdef class SphericalVoids:
 
         # define the arrays needed to compute the VSF
         Nvoids = np.zeros(bins,   dtype=np.int32)
-        vsf    = np.zeros((bins-1, bins-1, bins-1), dtype=np.float32)
+        vsf    = np.zeros((3, bins-1), dtype=np.float32)
         # Rmean  = np.zeros(bins-1, dtype=np.float32)
 
         # iterate through void radii
@@ -584,15 +550,17 @@ cdef class SphericalVoids:
         for q in range(bins):
 
             R = self.Radii[q]
-            logger.info(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
+            logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
             delta_sm = self._smoothing(R)  # single precision smoothing
 
             # check void cells are present at this radius
             if np.min(delta_sm)>self.void_delta:
-                logger.info('No cells with delta < {self.void_delta:.2f}')
+                logger.info(f'No cells with delta < {self.void_delta:.2f} for R={R:.1f} Mpc/h')
+
                 continue
 
-            IDs = self._find_underdensities(delta_sm, in_void, delta_v, IDs, xdim, ydim, zdim, yzdim)
+            local_voids = 0
+            IDs = self._find_underdensities(delta_sm, in_void, delta_v, IDs, xdim, ydim, zdim, yzdim, &local_voids)
 
             # determine void radius in terms of number of mesh cells
             R_grid = R/self.cellsize; Ncells = <int>R_grid + 1
@@ -602,21 +570,21 @@ cdef class SphericalVoids:
             # select method to identify nearby voids based on radius
             mode = 0 if total_voids_found < (2*Ncells+1)**3 else 1
             threads2 = 1 if Ncells<12 else min(4, self.threads) #empirically this seems to be the best
-            logger.debug(f'Setting threads2 = {threads2}')
-            logger.info(f'Identifying nearby voids using mode {mode}')
+            logger.debug(f'Setting threads2 = {threads2} (threads={self.threads})')
+            logger.debug(f'Identifying nearby voids using mode {mode}')
 
             # set function wrapping based on box-like
             if self.box_like:
                 num_voids_around1 = VOL.num_voids_around1_wrap
                 num_voids_around2 = VOL.num_voids_around2_wrap
-                mark_void_region = VOL.mark_void_region_wrap
+                mark_void_region  = VOL.mark_void_region_wrap
             else:
                 num_voids_around1 = VOL.num_voids_around1
                 num_voids_around2 = VOL.num_voids_around2
-                mark_void_region = VOL.mark_void_region
+                mark_void_region  = VOL.mark_void_region
 
             # identify nearby voids
-            for p in range(IDs.size):
+            for p in range(local_voids):
 
                 # find mesh coordinates of underdense cell
                 ID = IDs[p]
@@ -628,12 +596,13 @@ cdef class SphericalVoids:
                 if mode==0:
                     # nearby_voids = self._nearby_voids1(total_voids_found, i, j, k, 
                                                        # xdim, ydim, zdim,
-                                                       # &void_radius[0], &void_pos[0,0], 
+                                                       # &void_rad[0], &void_pos[0,0], 
                                                        # R_grid, threads2)
                     nearby_voids = num_voids_around1(self.void_overlap, total_voids_found, 
                                                      xdim, ydim, zdim, i, j, k, 
-                                                     &void_radius[0], &void_pos[0,0], 
+                                                     &void_rad[0], &void_pos[0,0], 
                                                      R_grid, threads2)
+
                 else:
                     # nearby_voids = self._nearby_voids2(Ncells, i, j, k,
                                                        # xdim, ydim, zdim, yzdim,
@@ -649,7 +618,7 @@ cdef class SphericalVoids:
                     void_pos[total_voids_found, 0] = i
                     void_pos[total_voids_found, 1] = j
                     void_pos[total_voids_found, 2] = k
-                    void_radius[total_voids_found] = R_grid
+                    void_rad[total_voids_found] = R_grid
 
                     voids_found += 1; total_voids_found += 1
                     in_void[i,j,k] = 1
@@ -660,18 +629,19 @@ cdef class SphericalVoids:
                     mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
                                      yzdim, R_grid2, i, j, k, threads=1)
 
-            logger.info(f'Found {voids_found} voids with radius R={R} Mpc/h')
+            logger.info(f'Found {voids_found} voids with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
             void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
-            void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void aadii
+            void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
             logger.debug(f'Occupied void volume fraction = {void_cell_fraction:.3f} ({void_volume_fraction:.3f} expected)')
 
         logger.info(f'{total_voids_found} total voids found.')
+        logger.info(f'Occupied void volume fraction = {void_cell_fraction:.3f} ({void_volume_fraction:.3f} expected)')
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(bins-1):
-            norm = 1 / (vol_mesh * log(Radii[i] / Radii[i+1]))
-            vsf[0,i] = sqrt(Radii[i] * Radii[i+1])  # geometric mean radius for logarithmic scale
+            norm = 1 / (vol_mesh * log(self.Radii[i] / self.Radii[i+1]))
+            vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
             vsf[1,i] = Nvoids[i] * norm  # vsf
             vsf[2,i] = sqrt(Nvoids[i]) * norm  # poisson uncertainty
         
@@ -684,7 +654,7 @@ cdef class SphericalVoids:
             # self.void_position[i] = np.asarray(void_pos[:total_voids_found,i]) + 0.5 + self.boxcenter[i] - self.boxsize[i]/2
         self.void_position = position * np.asarray(self.cellsize, dtype=np.float32) + box_shift  # transform positions relative to data 
         # self.void_position = np.asarray(void_pos[:total_voids_found], dtype=np.float32) * self.cellsize  # relative to box not data
-        self.void_radius   = np.asarray(void_radius[:total_voids_found]) * self.cellsize
+        self.void_radius   = np.asarray(void_rad[:total_voids_found]) * self.cellsize
         # self.Rbins         = np.asarray(Rmean)
         self.void_vsf      = np.asarray(vsf) 
 

@@ -106,7 +106,7 @@ class DensityMesh:
             else:
                 positions[:,2] = z_to_dist(positions[:,2])
             # convert sky positions
-            positions = sky_to_cartesian(positions[:,2], *positions[:,:2], **kwargs)
+            positions = sky_to_cartesian(positions[:,2], positions[:,0], positions[:,1], **kwargs)
 
         return positions, weights
 
@@ -161,7 +161,7 @@ class DensityMesh:
 
         # # save data and randoms otherwise deleted by Pyrecon
         # self.mesh_data = mesh.mesh_data
-        # self.mesh_randoms = mesh.mesh_randoms
+        self.mesh_randoms = mesh.mesh_randoms
 
         # manually apply smoothing
         if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
@@ -302,7 +302,7 @@ class DensityMesh:
             boxlike_hdu = fits.ImageHDU(data=[int(self.box_like)], name='box_like')
             # save
             logger.info(f'Saving density mesh to {save_mesh}.fits')
-            hdul = fits.HDUList([delta_hdu, cellsize_hdu, boxlike_hdu])
+            hdul = fits.HDUList([delta_hdu, cellsize_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
             hdul.writeto(f'{save_mesh}.fits', overwrite=True)
             hdul.close()
 

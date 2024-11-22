@@ -40,8 +40,8 @@ int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim,
       // exit if void volume overlap greater than threshold 
       if (tot_overlap>void_overlap)
 	{
-	 nearby_voids += 1;
-	 continue;
+	  nearby_voids += 1;
+	  continue;
 	}
 
       dx = i - void_pos[3*l+0];
@@ -60,7 +60,7 @@ int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim,
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	  // nearby_voids += 1;
@@ -88,8 +88,8 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
       // exit if void volume overlap greater than threshold 
       if (tot_overlap>void_overlap)
 	{
-	 nearby_voids += 1;
-	 continue;
+	  nearby_voids += 1;
+	  continue;
 	}
 
       dx = i - void_pos[3*l+0];
@@ -100,7 +100,7 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	  // nearby_voids += 1;
@@ -126,8 +126,8 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
       // exit if void volume overlap greater than threshold 
       if (tot_overlap>void_overlap)
 	{
-	 nearby_voids += 1;
-	 continue;
+	  nearby_voids += 1;
+	  continue;
 	}
 
       //i1 = (i+l+dims)%dims;
@@ -188,8 +188,8 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
       // exit if void volume overlap greater than threshold 
       if (tot_overlap>void_overlap)
 	{
-	 nearby_voids += 1;
-	 continue;
+	  nearby_voids += 1;
+	  continue;
 	}
       i1 = i+l;
       for (m=-Ncells; m<=Ncells; m++)
