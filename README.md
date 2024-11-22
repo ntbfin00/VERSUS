@@ -7,7 +7,6 @@ Void-finding with optional real-space reconstruction for use with both simulated
 
 ## Requirements
 
-Minimal requirements:
 - pyrecon
 - astropy
 - pyfftw
@@ -33,7 +32,6 @@ If randoms are supplied from command line, VERSUS will run in survey (not simula
 
 Module:
 ```
-from VERSUS.meshbuilder import DensityMesh
 from VERSUS.sphericalvoids import SphericalVoids
 
 VF = SphericalVoids(data_positions=<path or 3D array>, data_weights=<1D array>,                                                                          random_positions=<path or 3D array>, random_weights=<1D array>,
