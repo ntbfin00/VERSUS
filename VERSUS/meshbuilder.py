@@ -30,20 +30,32 @@ class DensityMesh:
     dtype: string
         Mesh data type.
 
+    reconstruct: string
+        Type of reconstruction to run - 'disp', 'rsd' or 'disp+rsd'. Defaults to no reconstruction.
+
+    recon_args: dict
+        Reconstruction arguments - 'f', 'bias', 'engine', 'los' (only required for box), 'smoothing radius' and 'recon_pad'.
+
     kwargs : dict
         Optional arguments.
     """
 
-    def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, data_cols=None, dtype='f4'):
+    def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, 
+                 data_cols=None, dtype='f4', reconstruct=None, recon_args=None, **kwargs):
+
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
         logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
         self.dtype = dtype
+        logger.debug(f'Data type: {self.dtype}')
+        # set reconstruction parameters
+        self.reconstruct = reconstruct
+        self.recon_args = {'f': 0.8, 'bias': 2.} if recon_args is None else recon_args
         # default options to read data column headers
         if data_cols is None:
             data_cols = ['X','Y','Z'] if self.box_like else ['RA','DEC','Z']
         # load positions from file
-        if type(data_positions) is str: 
+        if type(data_positions) is str:
             self.data_positions, self.data_weights = self._load_data(data_positions, data_cols)
         # load positions from array
         else:
@@ -59,7 +71,6 @@ class DensityMesh:
             self.random_weights = random_weights
         self.N_random = None if random_positions is None else len(self.random_positions)  # total randoms
         self.W_random = self.N_random if random_weights is None else np.array(random_weights).sum()  # sum of random weights
-
 
     def _load_data(self, data_fn, data_cols, z_to_dist=None, **kwargs):
         r"""
@@ -80,18 +91,27 @@ class DensityMesh:
             Additional arguments for pyrecon.sky_to_cartesian
         """
 
-        f = fits.open(data_fn)
-        N = f[1].header['NAXIS2']
-        positions = np.zeros((N, 3))
         weights = None
-        logger.info(f'Loading positions from file with column headers {data_cols}.')
-        for (i,c) in enumerate(data_cols):
+
+        if data_fn.endswith('.fits'):
+            f = fits.open(data_fn)
+            N = f[1].header['NAXIS2']
+            positions = np.zeros((N, 3))
+            logger.info(f'Loading positions from FITS file with column headers {data_cols}.')
+            for (i,c) in enumerate(data_cols):
+                # read weights if 4th column provided
+                if i<3: 
+                    positions[:,i] = f[1].data[c]
+                else:
+                    weights = f[1].data[c]
+            f.close()
+        elif data_fn.endswith('.npy'):
+            logger.info(f'Loading positions from npy file.')
+            positions = np.load(data_fn)[:,:3]
             # read weights if 4th column provided
-            if i<3: 
-                positions[:,i] = f[1].data[c]
-            else:
-                weights = f[1].data[c]
-        f.close()
+            if len(data_cols)==4: weights = np.load(data_fn)[:,3]
+        else:
+            raise Exception("File type not recognised. Please provide a file ending in .fits or .npy.")
 
         # if x or y contained in data_cols assume positions are provided in cartesian coordinates
         # else convert sky positions to cartesian
@@ -111,7 +131,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1.1, **kwargs):
+    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1., **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -129,15 +149,19 @@ class DensityMesh:
         self.engine = engine
 
         # use galaxies (or randoms for survey) to estimate boxsize if not supplied
-        positions = self.data_positions if self.box_like else self.random_positions
-        boxsize, boxcenter = (None, None)
+        if self.box_like:
+            positions = self.data_positions
+            wrap = True
+        else:
+            positions = self.random_positions
+            wrap = False
 
         # select reconstruction algorithm
         exec(f"from pyrecon import {engine}; Recon = {engine}", globals())
 
         # initialise mesh
-        mesh = Recon(positions=positions, boxsize=boxsize, boxcenter=boxcenter, 
-                     cellsize=cellsize, boxpad=boxpad, dtype=self.dtype, **kwargs)
+        mesh = Recon(positions=positions, cellsize=cellsize, wrap=wrap,
+                     boxpad=boxpad, dtype=self.dtype, **kwargs)
 
         return mesh
 
@@ -159,9 +183,9 @@ class DensityMesh:
         # assign randoms
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
-        # # save data and randoms otherwise deleted by Pyrecon
+        # save data and randoms otherwise deleted by Pyrecon
         # self.mesh_data = mesh.mesh_data
-        self.mesh_randoms = mesh.mesh_randoms
+        # self.mesh_randoms = mesh.mesh_randoms
 
         # manually apply smoothing
         if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
@@ -171,17 +195,30 @@ class DensityMesh:
         # calculate mesh overdensity
         mesh.set_density_contrast(**kwargs)
 
-        # return mesh
 
+    def run_recon(self, f=0.8, bias=2, engine='IterativeFFTReconstruction', los='z', 
+                  recon_pad=1.1, smoothing_radius=15., field='rsd', **kwargs):
+        r"""
+        Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
+        """
 
-    # def reconstruct(self, f, engine='IterativeFFTReconstruction', los='z', recon_pad=1.1, **kwargs):
-        # r"""
-        # Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
-        # """
+        if not self.box_like: los = None  # survey has local line-of-sight
 
-        # self.data_mesh = _set_mesh(cellsize=cellsize, engine=engine, boxpad=recon_pad, **kwargs)
-        
-        # if not self.box_like: self.data_mesh.los = los  # survey has local line-of-sight
+        logger.info(f"Running {field} reconstruction with {engine}")
+        logger.info(f"Recon parameters: f={f:.1f}, b={bias:.1f}, los={los}, r_smooth={smoothing_radius}, pad={recon_pad}")
+        # set and smooth mesh
+        self.data_mesh = self._set_mesh(f=f, bias=bias, engine=engine, cellsize=self.cellsize, los=los,
+                                        boxpad=recon_pad, fft_engine='fftw', fft_plan='estimate', **kwargs)
+        self._set_mesh_density(self.data_mesh, smoothing_radius=smoothing_radius)
+        # run reconstruction
+        logger.debug(f"Reconstruction running on {self.data_mesh.nmesh} mesh.")
+        self.data_mesh.run()
+        logger.debug("Reconstruction complete. Setting new positions.")
+        # read reconstructed positions
+        self.data_positions = self.data_mesh.read_shifted_positions(self.data_positions, field=field)
+        if self.random_positions is not None and 'disp' in field: 
+            self.random_positions = self.data_mesh.read_shifted_positions(self.random_positions, field='disp')  # RecIso
+        del self.data_mesh
 
         
     def size_mesh(self, niterations=4, cells_per_r_sep=2, smoothing_radius=0., **kwargs):
@@ -229,7 +266,7 @@ class DensityMesh:
                 # estimate survey volume
                 self.volume = survey_mask.sum() * mesh.cellsize.prod()
                 # estimate density using cells inside survey
-                self.rho_mean = (self.W_data/self.W_random) * self.mesh_randoms.value[survey_mask]
+                self.rho_mean = (self.W_data/self.W_random) * mesh.mesh_randoms.value[survey_mask]
                 self.rho_mean = self.rho_mean.mean() / mesh.cellsize.prod()  # must scale by cellsize
                 # estimate average galaxy separation
                 self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
@@ -267,10 +304,12 @@ class DensityMesh:
         # estimate cellsize based on galaxy density
         if not hasattr(self, 'cellsize'): self.size_mesh(cells_per_r_sep=cells_per_r_sep, smoothing_radius=smoothing_radius, **kwargs)
 
+        # run optional reconstruction
+        if self.reconstruct is not None: self.run_recon(field=self.reconstruct, **self.recon_args)
+
         # generate mesh
         mesh = self._set_mesh(cellsize=self.cellsize,
-                              boxpad=1. if self.box_like else boxpad, 
-                              wrap=True if self.box_like else False,
+                              boxpad=1. if self.box_like else boxpad, # pad survey to better detect boundary voids
                               bias=1.)  # bias set to 1. so voids are found on galaxy (not matter) field
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')

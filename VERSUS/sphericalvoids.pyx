@@ -62,6 +62,7 @@ cdef class SphericalVoids:
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
+                 dtype='f4', reconstruct=None, recon_args=None, 
                  delta_mesh=None, mesh_args=None, **kwargs):
 
         cdef np.ndarray[np.float32_t, ndim=3] delta
@@ -70,7 +71,8 @@ cdef class SphericalVoids:
         if data_positions is not None:
             from .meshbuilder import DensityMesh
             mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
-                               random_positions=random_positions, random_weights=random_weights, data_cols=data_cols)
+                               random_positions=random_positions, random_weights=random_weights, data_cols=data_cols, 
+                               dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
             mesh.create_mesh(**kwargs)
             self.delta = mesh.delta
             self.nmesh = mesh.nmesh
@@ -495,8 +497,13 @@ cdef class SphericalVoids:
 
         # set default radii if not provided
         if radii[0] == 0.:
-            self.Radii = 10**np.arange(1, 0.3, -0.05, dtype=np.float32) * self.cellsize  # ~2-10x cellsize in logarithmic spacing
-            # self.Radii = np.arange(104,1,-20, dtype=np.float32) * self.cellsize  # 4-104x cellsize
+            # ~2-10x cellsize in logarithmic spacing
+            # self.Radii = 10**np.arange(1, 0.3, -0.005, dtype=np.float32) * self.cellsize  
+            # self.Radii = np.logspace(1, 0.3, 28, dtype=np.float32) * self.cellsize  
+            # ~2-10x cellsize in linear spacing
+            self.Radii = np.linspace(10, 2, 25, dtype=np.float32) * self.cellsize
+            # ~2-10x cellsize in reverse logarithmic spacing
+            # self.Radii = (10 + 10**0.3 - np.logspace(0.3, 1, 28, dtype=np.float32)) * self.cellsize 
             logger.debug(f'Radii set by default')
         else:
             # order input radii from largest to smallest
@@ -545,6 +552,18 @@ cdef class SphericalVoids:
         vsf    = np.zeros((3, bins-1), dtype=np.float32)
         # Rmean  = np.zeros(bins-1, dtype=np.float32)
 
+        # set function wrapping based on box-like
+        if self.box_like:
+            logger.debug("Using wrapped VF algorithms")
+            num_voids_around1 = VOL.num_voids_around1_wrap
+            num_voids_around2 = VOL.num_voids_around2_wrap
+            mark_void_region  = VOL.mark_void_region_wrap
+        else:
+            logger.debug("Using VF algorithms with boundary conditions")
+            num_voids_around1 = VOL.num_voids_around1
+            num_voids_around2 = VOL.num_voids_around2
+            mark_void_region  = VOL.mark_void_region
+
         # iterate through void radii
         total_voids_found = 0
         for q in range(bins):
@@ -572,16 +591,6 @@ cdef class SphericalVoids:
             threads2 = 1 if Ncells<12 else min(4, self.threads) #empirically this seems to be the best
             logger.debug(f'Setting threads2 = {threads2} (threads={self.threads})')
             logger.debug(f'Identifying nearby voids using mode {mode}')
-
-            # set function wrapping based on box-like
-            if self.box_like:
-                num_voids_around1 = VOL.num_voids_around1_wrap
-                num_voids_around2 = VOL.num_voids_around2_wrap
-                mark_void_region  = VOL.mark_void_region_wrap
-            else:
-                num_voids_around1 = VOL.num_voids_around1
-                num_voids_around2 = VOL.num_voids_around2
-                mark_void_region  = VOL.mark_void_region
 
             # identify nearby voids
             for p in range(local_voids):
@@ -634,13 +643,17 @@ cdef class SphericalVoids:
 
             void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
             void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
-            logger.debug(f'Occupied void volume fraction = {void_cell_fraction:.3f} ({void_volume_fraction:.3f} expected)')
+            logger.debug('Occupied void volume fraction = {:.3f} (expected {}{:.3f})'.format(void_cell_fraction, 
+                                                                                             '<' if void_overlap>0. else '',
+                                                                                             void_volume_fraction))
 
         logger.info(f'{total_voids_found} total voids found.')
-        logger.info(f'Occupied void volume fraction = {void_cell_fraction:.3f} ({void_volume_fraction:.3f} expected)')
+        logger.info('Occupied void volume fraction = {:.3f} (expected {}{:.3f})'.format(void_cell_fraction, 
+                                                                                        '<' if void_overlap>0. else '',
+                                                                                        void_volume_fraction))
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(bins-1):
-            norm = 1 / (vol_mesh * log(self.Radii[i] / self.Radii[i+1]))
+            norm = 1 / (np.prod(self.boxsize) * log(self.Radii[i] / self.Radii[i+1]))
             vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
             vsf[1,i] = Nvoids[i] * norm  # vsf
             vsf[2,i] = sqrt(Nvoids[i]) * norm  # poisson uncertainty
