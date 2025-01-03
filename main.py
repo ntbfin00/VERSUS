@@ -1,5 +1,6 @@
 import numpy as np
 import argparse
+from pathlib import Path
 import logging
 from VERSUS.sphericalvoids import SphericalVoids
 
@@ -12,7 +13,7 @@ def parse_args():
     parser.add_argument('--random', help="Array or path to random positions")
     parser.add_argument('--data_weights', help="Array of weights for data positions")
     parser.add_argument('--random_weights', help="Array of weights for random positions")
-    parser.add_argument('--columns', help="Data column headers to read positions (XYZ/rdz)")
+    parser.add_argument('--columns', nargs='+', help="Data column headers to read positions (XYZ/rdz)")
     parser.add_argument('--mesh', default=None, 
                         help="Array or path to density mesh. If not None and data also provided, save to path provided (True for default path).")
     parser.add_argument('--cells_per_r_sep', type=float, default=2., 
@@ -28,6 +29,7 @@ def parse_args():
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=0, 
                         help="Number of threads used for multi-threaded processes. Defaults to maximum available.")
+    parser.add_argument('--dryrun', required=False, action='store_true',help="Run script without saving outputs")
 
     args = parser.parse_args()
     if args.data is None and args.mesh is None:
@@ -43,23 +45,35 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # set save_mesh argument
+    if args.dryrun:
+        save_mesh = False
+    elif args.mesh == 'True':
+        save_mesh = True
+    else:
+        save_mesh = args.mesh
+
+    # initialise void finder with command-line arguments
     VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
-                        delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=True if args.mesh == 'True' else args.mesh,
+                        delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
                         cells_per_r_sep=args.cells_per_r_sep, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
-    # VF.run_voidfinding(np.array(args.radii, dtype=np.float32), void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
+    # run void finding
     VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
 
+    # save void output to file
     if args.save_fn is None:
-        from pathlib import Path
         path = "output/"
-        Path("output").mkdir(parents=True, exist_ok=True)
+        fn = path
     else:
-        path = args.save_fn + '_'
-    logger.info(f"Saving output to {path}*")
-    np.save(path + "void_positions.npy", VF.void_position)
-    np.save(path + "void_radii.npy", VF.void_radius)
-    np.save(path + "void_vsf.npy", VF.void_vsf)
+        path = '/'.join(args.save_fn.split('/')[:-1])
+        fn = args.save_fn
+    logger.info(f"Saving output to {fn}*")
+    if not args.dryrun:
+        Path(path).mkdir(parents=True, exist_ok=True)  # create directory if not exists
+        np.save(fn + "void_positions.npy", VF.void_position)
+        np.save(fn + "void_radii.npy", VF.void_radius)
+        np.save(fn + "void_vsf.npy", VF.void_vsf)
 
 
 if __name__ == "__main__":
