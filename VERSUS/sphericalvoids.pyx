@@ -48,6 +48,7 @@ cdef class SphericalVoids:
     # cdef np.uint8_t[:,:,::1] survey_mask
     cdef public int[3] nmesh
     cdef public float cellsize
+    cdef public float r_sep 
     cdef public float[3] boxsize
     cdef public float[3] boxcenter
     cdef public bint box_like
@@ -77,6 +78,7 @@ cdef class SphericalVoids:
             self.delta = mesh.delta
             self.nmesh = mesh.nmesh
             self.cellsize = mesh.cellsize
+            self.r_sep = mesh.r_sep
             self.boxsize = mesh.boxsize
             self.boxcenter = mesh.boxcenter
             self.box_like = mesh.box_like
@@ -85,11 +87,12 @@ cdef class SphericalVoids:
             if type(delta_mesh) is str:
                 self.load_mesh(delta_mesh)
             else:
-                if not all([arg in mesh_args for arg in ['cellsize', 'boxsize', 'boxcenter', 'box_like']]):
-                    raise Exception('cellsize, boxsize, boxcenter and box_like must be provided in addition to delta mesh with mesh_args.')
+                if not all([arg in mesh_args for arg in ['cellsize', 'r_sep', 'boxsize', 'boxcenter', 'box_like']]):
+                    raise Exception('cellsize, r_sep, boxsize, boxcenter and box_like must be provided in addition to delta mesh with mesh_args.')
                 self.delta = delta_mesh
                 self.nmesh = delta_mesh.shape
                 self.cellsize = mesh_args['cellsize']
+                self.r_sep = mesh_args['r_sep']
                 self.boxsize = mesh_args['boxsize']
                 self.boxcenter = mesh_args['boxcenter']
                 self.box_like = mesh_args['box_like']
@@ -112,6 +115,7 @@ cdef class SphericalVoids:
         self.delta = f[0].data.byteswap().newbyteorder()
         self.nmesh = f[0].data.shape
         self.cellsize = f['cellsize'].data
+        self.r_sep = f['r_sep'].data
         self.boxsize = f['boxsize'].data
         self.boxcenter = f['boxcenter'].data
         self.box_like = f['box_like'].data
@@ -473,7 +477,8 @@ cdef class SphericalVoids:
             Maximum allowed volume fraction of void overlap.
         """
 
-        cdef float[:] Radii=np.array(radii, dtype=np.float32)
+        # cdef float[:] Radii=np.array(radii, dtype=np.float32)
+        cdef np.ndarray[float, ndim=1] Radii=np.array(radii, dtype=np.float32)
         cdef float R, R_grid, R_grid2, Rmin
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
@@ -500,10 +505,14 @@ cdef class SphericalVoids:
             # ~2-10x cellsize in logarithmic spacing
             # self.Radii = 10**np.arange(1, 0.3, -0.005, dtype=np.float32) * self.cellsize  
             # self.Radii = np.logspace(1, 0.3, 28, dtype=np.float32) * self.cellsize  
-            # ~2-10x cellsize in linear spacing
-            self.Radii = np.linspace(10, 2, 25, dtype=np.float32) * self.cellsize
+            # self.Radii = np.linspace(15, 7, 25, dtype=np.float32) * self.cellsize
             # ~2-10x cellsize in reverse logarithmic spacing
             # self.Radii = (10 + 10**0.3 - np.logspace(0.3, 1, 28, dtype=np.float32)) * self.cellsize 
+
+            # ~2-8x average galaxy separation in linear spacing
+            Radii = np.linspace(8, 2, 19, dtype=np.float32) * self.r_sep
+            # self.Radii = np.array(Radii)[np.array(Radii) > self.cellsize]  # ensure radii larger than cellsize
+            self.Radii = Radii[Radii > self.cellsize]  # ensure radii larger than cellsize
             logger.debug(f'Radii set by default')
         else:
             # order input radii from largest to smallest

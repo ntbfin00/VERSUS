@@ -22,7 +22,7 @@ def parse_args():
                         help="Type of reconstruction ('disp', 'rsd' or 'disp+rsd'), growth rate and bias. Defaults to no reconstruction.")
     parser.add_argument('--recon_args', required=False, nargs='+', default=[0.8, 2.], 
                         help="Reconstruction arguments - 'f','bias','los','smoothing_radius','recon_pad','engine'.")
-    parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide cellsize, boxsize, boxcenter and box-like.")
+    parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide cellsize, r_sep, boxsize, boxcenter and box-like.")
     parser.add_argument('--radii', type=float, default=[0.], nargs='+', help="List of void radii to search for")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void")
     parser.add_argument('--void_overlap', type=float, default=0., help="Volume fraction of allowed void overlap")
@@ -35,7 +35,7 @@ def parse_args():
     if args.data is None and args.mesh is None:
         parser.error("Either --data or --mesh must be provided.")
 
-    if args.mesh_args is not None: args.mesh_args = dict(zip(['cellsize','boxsize','boxcenter','box_like'], args.mesh_args))
+    if args.mesh_args is not None: args.mesh_args = dict(zip(['cellsize','r_sep','boxsize','boxcenter','box_like'], args.mesh_args))
     if args.reconstruct is not None: 
         recon_keys = ['f','bias','los','smoothing_radius','recon_pad','engine'][:len(args.recon_args)]
         args.recon_args = dict(zip(recon_keys, args.recon_args))

@@ -336,12 +336,13 @@ class DensityMesh:
             delta_hdu = fits.PrimaryHDU(self.delta)
             # cellsize
             cellsize_hdu = fits.ImageHDU(data=[self.cellsize], name='cellsize')
+            rsep_hdu = fits.ImageHDU(data=[self.r_sep], name='r_sep')
             boxsize_hdu = fits.ImageHDU(data=self.boxsize, name='boxsize')
             boxcenter_hdu = fits.ImageHDU(data=self.boxcenter, name='boxcenter')
             boxlike_hdu = fits.ImageHDU(data=[int(self.box_like)], name='box_like')
             # save
             logger.info(f'Saving density mesh to {save_mesh}.fits')
-            hdul = fits.HDUList([delta_hdu, cellsize_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
+            hdul = fits.HDUList([delta_hdu, cellsize_hdu, rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
             hdul.writeto(f'{save_mesh}.fits', overwrite=True)
             hdul.close()
 
