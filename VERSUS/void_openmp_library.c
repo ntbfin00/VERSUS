@@ -6,7 +6,7 @@
 
 // Determine the volume overlap fraction between two spheres
 // Rv - Radius of previously detected void, Rc - Radius of void candidate, d2 - Squared distance between void and candidate centres.
-float calc_void_overlap(float Rv, float Rc, float d2)
+float calc_void_overlap(float Rv, float Rc, float d2, int ol_cent)
 {
   float a, b, c, d;
 
@@ -14,11 +14,14 @@ float calc_void_overlap(float Rv, float Rc, float d2)
   if (d2 >= ((Rv + Rc)*(Rv + Rc)))  return 0.;
   
   d = sqrt(d2);
+  // no overlap if void centre is not overlapped (if void_overlap=True)
+  /*if (ol_cent == 1 && d >= Rv)  return 0.;*/
+
   // expression from: https://mathworld.wolfram.com/Sphere-SphereIntersection.html
   a = (Rv + Rc - d) * (Rv + Rc - d);
   b = (d*d + 2*d*Rc - 3*Rc*Rc + 2*d*Rv + 6*Rc*Rv - 3*Rv*Rv);
   c = 1 / (16 * d * Rc*Rc*Rc);
-  
+
   return a * b * c;
 }
 
@@ -26,13 +29,14 @@ float calc_void_overlap(float Rv, float Rc, float d2)
 // This routine computes the distance between a cell and voids already identified
 // if that distance is smaller than the sum of their radii then the cell can not
 // host a void as it will overlap with the other void
-int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim, int ydim, int zdim,
+int num_voids_around1_wrap(float void_overlap, int ol_cent, long total_voids_found, int xdim, int ydim, int zdim,
 		      	   int i, int j, int k, float *void_radius, int *void_pos, float R_grid, int threads)
 {
 
   int l, nearby_voids=0;
   int dx, dy, dz, dist2;
   float overlap_frac, tot_overlap=0.;
+
 
 #pragma omp parallel for num_threads(threads) private(l,dx,dy,dz,dist2)
   for (l=0; l<total_voids_found; l++)
@@ -60,10 +64,9 @@ int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim,
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2, ol_cent);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
-	  // nearby_voids += 1;
 	}
     }
   
@@ -74,7 +77,7 @@ int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim,
 // This routine computes the distance between a cell and voids already identified
 // if that distance is smaller than the sum of their radii then the cell can not
 // host a void as it will overlap with the other void
-int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int ydim, int zdim,
+int num_voids_around1(float void_overlap, int ol_cent, long total_voids_found, int xdim, int ydim, int zdim,
 		      int i, int j, int k, float *void_radius, int *void_pos, float R_grid, int threads)
 {
 
@@ -100,10 +103,9 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2, ol_cent);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
-	  // nearby_voids += 1;
 	}
     }
   
@@ -114,7 +116,7 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
 int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, int xdim, int ydim, int zdim, int yzdim,
-		      	   float R_grid, float R_grid2, char *in_void, int threads)
+		      	   float R_grid, float R_grid2, long *in_void, int threads)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
@@ -159,7 +161,7 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<R_grid2)
 		    {
-		      overlap_frac = 3 / (4 * M_PI * R_grid*R_grid*R_grid);
+		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
 #pragma omp atomic
 		      tot_overlap += overlap_frac;
 		      // nearby_voids += 1;
@@ -176,7 +178,7 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
 int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int xdim, int ydim, int zdim, int yzdim,
-		      	   float R_grid, float R_grid2, char *in_void, int threads)
+		      	   float R_grid, float R_grid2, long *in_void, int threads)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
@@ -207,7 +209,7 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<R_grid2)
 		    {
-		      overlap_frac = 3 / (4 * M_PI * R_grid*R_grid*R_grid);
+		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
 #pragma omp atomic
 		      tot_overlap += overlap_frac;
 		      // nearby_voids += 1;
@@ -221,7 +223,7 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
 }
 
 
-void mark_void_region_wrap(char *in_void, int Ncells, int xdim, int ydim, int zdim, 
+void mark_void_region_wrap(long *in_void, int Ncells, int xdim, int ydim, int zdim, 
 			   int yzdim, float R_grid2, int i, int j, int k, int threads)
 {
   int l, m, n, i1, j1, k1;
@@ -254,7 +256,7 @@ void mark_void_region_wrap(char *in_void, int Ncells, int xdim, int ydim, int zd
 	      if (dist2<R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
-		  in_void[number] = 1;
+		  in_void[number] += 1;
 		}
 	    }
 	}
@@ -262,7 +264,7 @@ void mark_void_region_wrap(char *in_void, int Ncells, int xdim, int ydim, int zd
 }
 
 
-void mark_void_region(char *in_void, int Ncells, int xdim, int ydim, int zdim, 
+void mark_void_region(long *in_void, int Ncells, int xdim, int ydim, int zdim, 
 		      int yzdim, float R_grid2, int i, int j, int k, int threads)
 {
   int l, m, n, i1, j1, k1;
@@ -286,7 +288,7 @@ void mark_void_region(char *in_void, int Ncells, int xdim, int ydim, int zdim,
 	      if (dist2<R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
-		  in_void[number] = 1;
+		  in_void[number] += 1;
 		}
 	    }
 	}

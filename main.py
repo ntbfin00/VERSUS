@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide cellsize, r_sep, boxsize, boxcenter and box-like.")
     parser.add_argument('--radii', type=float, default=[0.], nargs='+', help="List of void radii to search for")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void")
-    parser.add_argument('--void_overlap', type=float, default=0., help="Volume fraction of allowed void overlap")
+    parser.add_argument('--void_overlap', default=0., help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=0, 
                         help="Number of threads used for multi-threaded processes. Defaults to maximum available.")
@@ -39,6 +39,13 @@ def parse_args():
     if args.reconstruct is not None: 
         recon_keys = ['f','bias','los','smoothing_radius','recon_pad','engine'][:len(args.recon_args)]
         args.recon_args = dict(zip(recon_keys, args.recon_args))
+
+    if args.void_overlap in ['True', 'true']:
+        args.void_overlap = True
+    elif args.void_overlap in ['False', 'false']:
+        args.void_overlap = False
+    else:
+        args.void_overlap = float(args.void_overlap)
 
     return args
 
