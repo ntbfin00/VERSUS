@@ -131,7 +131,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1., **kwargs):
+    def _set_mesh(self, engine='IterativeFFTReconstruction', cellsize=1., boxpad=1., **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -183,19 +183,10 @@ class DensityMesh:
         # assign randoms
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
-        # save data and randoms otherwise deleted by Pyrecon
-        # self.mesh_data = mesh.mesh_data
-        # self.mesh_randoms = mesh.mesh_randoms
-
-        # manually apply smoothing
-        r_smooth = smoothing_radius * self.cellsize
-        if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
-            mesh.mesh_data.smooth_gaussian(r_smooth)
-            if not self.box_like: mesh.mesh_randoms.smooth_gaussian(r_smooth)
-
         # calculate mesh overdensity
+        r_smooth = smoothing_radius * self.cellsize
+        if smoothing_radius > 0.: logger.info(f"Applying {r_smooth:.1f} Mpc smoothing to data and random fields.")
         mesh.set_density_contrast(smoothing_radius=r_smooth, **kwargs)
-        logger.debug(f"{mesh.smoothing_radius:.1f} Mpc smoothing applied to data and random fields")
 
 
     def run_recon(self, f=0.8, bias=2, engine='IterativeFFTReconstruction', los='z', 
