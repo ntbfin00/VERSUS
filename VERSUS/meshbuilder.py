@@ -188,12 +188,14 @@ class DensityMesh:
         # self.mesh_randoms = mesh.mesh_randoms
 
         # manually apply smoothing
+        r_smooth = smoothing_radius * self.cellsize
         if self.engine == 'IterativeFFTParticleReconstruction' and smoothing_radius>0.:
-            mesh.mesh_data.smooth_gaussian(smoothing_radius * self.cellsize)
-            if not self.box_like: mesh.mesh_randoms.smooth_gaussian(smoothing_radius * self.cellsize)
+            mesh.mesh_data.smooth_gaussian(r_smooth)
+            if not self.box_like: mesh.mesh_randoms.smooth_gaussian(r_smooth)
 
         # calculate mesh overdensity
-        mesh.set_density_contrast(**kwargs)
+        mesh.set_density_contrast(smoothing_radius=r_smooth, **kwargs)
+        logger.debug(f"{mesh.smoothing_radius:.1f} Mpc smoothing applied to data and random fields")
 
 
     def run_recon(self, f=0.8, bias=2, engine='IterativeFFTReconstruction', los='z', 
@@ -272,6 +274,7 @@ class DensityMesh:
                 self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
         # del self.mesh_data, self.mesh_randoms
         self.cellsize = self.r_sep/cells_per_r_sep
+        logger.debug(f"Volume estimate: {self.volume:.0f}")
         logger.info(f'Cellsize set to {self.cellsize:.2f} ({cells_per_r_sep:.1f} cells per average separation)') 
 
         
@@ -302,7 +305,7 @@ class DensityMesh:
         """
 
         # estimate cellsize based on galaxy density
-        if not hasattr(self, 'cellsize'): self.size_mesh(cells_per_r_sep=cells_per_r_sep, smoothing_radius=smoothing_radius, **kwargs)
+        if not hasattr(self, 'cellsize'): self.size_mesh(cells_per_r_sep=cells_per_r_sep)#, smoothing_radius=smoothing_radius, **kwargs)
 
         # run optional reconstruction
         if self.reconstruct is not None: self.run_recon(field=self.reconstruct, **self.recon_args)

@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument('--radii', type=float, default=[0.], nargs='+', help="List of void radii to search for")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void")
     parser.add_argument('--void_overlap', default=0., help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
+    parser.add_argument('--smoothing', type=float, default=0., help="Radius (as fraction of cellsize) to preliminarily smooth data and random fields before computing density.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=0, 
                         help="Number of threads used for multi-threaded processes. Defaults to maximum available.")
@@ -63,7 +64,8 @@ def main():
     # initialise void finder with command-line arguments
     VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
                         delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
-                        cells_per_r_sep=args.cells_per_r_sep, reconstruct=args.reconstruct, recon_args=args.recon_args)
+                        cells_per_r_sep=args.cells_per_r_sep, smoothing_radius=args.smoothing,
+                        reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
     VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
