@@ -175,7 +175,7 @@ class DensityMesh:
             Input density mesh.
             
         smoothing_radius : float, default=0.
-            Gaussian radius as factor of cellsize with which to smooth data and random fields before computing overdensity.
+            Gaussian radius as factor of galaxy separation with which to smooth data and random fields before computing overdensity.
         """
 
         # assign data
@@ -184,7 +184,7 @@ class DensityMesh:
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
         # calculate mesh overdensity
-        r_smooth = smoothing_radius * self.cellsize
+        r_smooth = smoothing_radius * self.r_sep  # smoothing as a function of density
         if smoothing_radius > 0.: logger.info(f"Applying {r_smooth:.1f} Mpc smoothing to data and random fields.")
         mesh.set_density_contrast(smoothing_radius=r_smooth, **kwargs)
 
@@ -214,7 +214,7 @@ class DensityMesh:
         del self.data_mesh
 
         
-    def size_mesh(self, niterations=4, cells_per_r_sep=2, smoothing_radius=0., **kwargs):
+    def size_mesh(self, niterations=4, cellsize=4., smoothing_radius=0., **kwargs):
         r"""
         Estimate the survey volume, mean density and average galaxy separation.
 
@@ -223,11 +223,11 @@ class DensityMesh:
         niterations : int, default=4
             Number of iterations used to estimate the average galaxy separation.
 
-        cells_per_r_sep : float, default=2.
-            Number of cells used in size estimation as a fraction of the average galaxy separation.
+        cellsize: float, default=4.
+            Cellsize used to estimate the average galaxy separation.
 
         smoothing_radius : float, default=0.
-            Gaussian radius as factor of cellsize with which to smooth data and random fields before computing overdensity.
+            Gaussian radius as factor of galaxy separation with which to smooth data and random fields before computing overdensity.
 
         ran_min : float, default=0.01
             Minimum fraction of average randoms for cell to be counted as part of survey.
@@ -251,7 +251,7 @@ class DensityMesh:
             for i in range(niterations):
                 logger.debug(f'Iteration {i} of volume estimation')
                 # set cellsize to half estimated galaxy separation
-                self.cellsize = self.r_sep/cells_per_r_sep
+                self.cellsize = self.r_sep/2.
                 mesh = self._set_mesh(boxpad=1., cellsize=self.cellsize, bias=1.)
                 # determine survey boundary (cells outside have delta=0.)
                 self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs)
@@ -264,12 +264,13 @@ class DensityMesh:
                 # estimate average galaxy separation
                 self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
         # del self.mesh_data, self.mesh_randoms
-        self.cellsize = self.r_sep/cells_per_r_sep
-        logger.debug(f"Volume estimate: {self.volume:.0f}")
-        logger.info(f'Cellsize set to {self.cellsize:.2f} ({cells_per_r_sep:.1f} cells per average separation)') 
+        # self.cellsize = self.r_sep/cells_per_r_sep
+        self.cellsize = cellsize
+        logger.debug(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.4f}")
+        logger.info(f'Cellsize set to {self.cellsize:.2f}')# ({cells_per_r_sep:.1f} cells per average separation)') 
 
         
-    def create_mesh(self, boxpad=1.1, cells_per_r_sep=2., smoothing_radius=0., save_mesh=None, **kwargs):
+    def create_mesh(self, boxpad=1.1, cellsize=4., smoothing_radius=0., save_mesh=None, **kwargs):
         r"""
         Create the density mesh
 
@@ -278,10 +279,10 @@ class DensityMesh:
         pad : float, default=1.1
             Padding factor for survey mesh. Simulation box has no padding.
 
-        cells_per_r_sep: float, default=2.
-            Number of mesh cells per average galaxy separation. Used to set cellsize.
+        cellsize: float, default=4.
+            Size of mesh cells. 
 
-        smoothing_radius : float, default=0.
+        smoothing_radius : float, default=0.62
             Smoothing scale for random field.
 
         ran_min : float, default=0.01
@@ -296,13 +297,15 @@ class DensityMesh:
         """
 
         # estimate cellsize based on galaxy density
-        if not hasattr(self, 'cellsize'): self.size_mesh(cells_per_r_sep=cells_per_r_sep)#, smoothing_radius=smoothing_radius, **kwargs)
+        if not hasattr(self, 'cellsize'): self.size_mesh(cellsize=cellsize)#, smoothing_radius=smoothing_radius, **kwargs)
+        if (self.rho_mean * self.cellsize**3)>1: logger.warning("Cellsize exceeds one galaxy per cell. Mesh is no longer shot-noise dominated.")
 
         # run optional reconstruction
         if self.reconstruct is not None: self.run_recon(field=self.reconstruct, **self.recon_args)
 
         # generate mesh
         mesh = self._set_mesh(cellsize=self.cellsize,
+                              engine='IterativeFFTParticleReconstruction', # faster when smoothing is not required
                               boxpad=1. if self.box_like else boxpad, # pad survey to better detect boundary voids
                               bias=1.)  # bias set to 1. so voids are found on galaxy (not matter) field
 

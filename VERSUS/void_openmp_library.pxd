@@ -1,6 +1,6 @@
 cdef extern from "void_openmp_library.h":
 
-      int num_voids_around1(float void_overlap, int ol_cent, long total_voids_found, 
+      int num_voids_around1(float void_overlap, long total_voids_found, 
                             int xdim, int ydim, int zdim,
                             int i, int j, int k, float *void_radius, 
                             int *void_pos, float R_grid, int threads);
@@ -15,7 +15,7 @@ cdef extern from "void_openmp_library.h":
                             int yzdim, float R_grid2, 
                             int i, int j, int k, int threads);
 
-      int num_voids_around1_wrap(float void_overlap, int ol_cent, long total_voids_found, 
+      int num_voids_around1_wrap(float void_overlap, long total_voids_found, 
                                  int xdim, int ydim, int zdim,
                                  int i, int j, int k, float *void_radius, 
                                  int *void_pos, float R_grid, int threads);

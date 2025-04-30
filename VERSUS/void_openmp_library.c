@@ -6,7 +6,7 @@
 
 // Determine the volume overlap fraction between two spheres
 // Rv - Radius of previously detected void, Rc - Radius of void candidate, d2 - Squared distance between void and candidate centres.
-float calc_void_overlap(float Rv, float Rc, float d2, int ol_cent)
+float calc_void_overlap(float Rv, float Rc, float d2)
 {
   float a, b, c, d;
 
@@ -14,8 +14,6 @@ float calc_void_overlap(float Rv, float Rc, float d2, int ol_cent)
   if (d2 >= ((Rv + Rc)*(Rv + Rc)))  return 0.;
   
   d = sqrt(d2);
-  // no overlap if void centre is not overlapped (if void_overlap=True)
-  /*if (ol_cent == 1 && d >= Rv)  return 0.;*/
 
   // expression from: https://mathworld.wolfram.com/Sphere-SphereIntersection.html
   a = (Rv + Rc - d) * (Rv + Rc - d);
@@ -29,7 +27,7 @@ float calc_void_overlap(float Rv, float Rc, float d2, int ol_cent)
 // This routine computes the distance between a cell and voids already identified
 // if that distance is smaller than the sum of their radii then the cell can not
 // host a void as it will overlap with the other void
-int num_voids_around1_wrap(float void_overlap, int ol_cent, long total_voids_found, int xdim, int ydim, int zdim,
+int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim, int ydim, int zdim,
 		      	   int i, int j, int k, float *void_radius, int *void_pos, float R_grid, int threads)
 {
 
@@ -64,7 +62,7 @@ int num_voids_around1_wrap(float void_overlap, int ol_cent, long total_voids_fou
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2, ol_cent);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	}
@@ -77,7 +75,7 @@ int num_voids_around1_wrap(float void_overlap, int ol_cent, long total_voids_fou
 // This routine computes the distance between a cell and voids already identified
 // if that distance is smaller than the sum of their radii then the cell can not
 // host a void as it will overlap with the other void
-int num_voids_around1(float void_overlap, int ol_cent, long total_voids_found, int xdim, int ydim, int zdim,
+int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int ydim, int zdim,
 		      int i, int j, int k, float *void_radius, int *void_pos, float R_grid, int threads)
 {
 
@@ -103,7 +101,7 @@ int num_voids_around1(float void_overlap, int ol_cent, long total_voids_found, i
 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
-	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2, ol_cent);
+	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
 #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	}

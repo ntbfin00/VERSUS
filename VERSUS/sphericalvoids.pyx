@@ -11,6 +11,7 @@ cimport void_openmp_library as VOL
 
 # cimport void_openmp_library_TEST as VOL_TEST
 # from void_library import gaussian_smoothing
+# from scipy.ndimage import uniform_filter, gaussian_filter
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,6 @@ cdef class SphericalVoids:
     """
 
     cdef object delta
-    # cdef np.float32_t[:,:,::1] delta
-    # cdef np.uint8_t[:,:,::1] survey_mask
     cdef public int[3] nmesh
     cdef public float cellsize
     cdef public float r_sep 
@@ -59,9 +58,9 @@ cdef class SphericalVoids:
     cdef float void_delta
     cdef float void_overlap
     cdef int threads
-    cdef public float[:,::1] void_position
-    cdef public float[::1] void_radius
-    cdef public float[:,::1] void_vsf
+    cdef public object void_position
+    cdef public object void_radius
+    cdef public object void_vsf
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
@@ -84,6 +83,7 @@ cdef class SphericalVoids:
             self.boxsize = mesh.boxsize
             self.boxcenter = mesh.boxcenter
             self.box_like = mesh.box_like
+            logger.debug(f"Mesh data type: {mesh.dtype}")
         # load delta mesh
         elif delta_mesh is not None:
             if type(delta_mesh) is str:
@@ -123,6 +123,19 @@ cdef class SphericalVoids:
         self.box_like = f['box_like'].data
         f.close()
 
+    def rmin_spurious(self):
+        r"""
+        Determine the detection limit for spurious voids for the given tracer sampleusing an empirical formula. At smaller radii, spurious voids may contaminate the output void sample.
+
+        Parameters
+        ----------
+        """
+
+        rho_mean = 3 / (4 * np.pi * self.r_sep**3)
+        res = self.boxsize[0]/self.nmesh[0]
+        return (np.pi*self.void_delta + 5 / res**0.07 + 0.2) / rho_mean**(1/3) - 3
+
+
     def FFT3Dr(self):
         logger.debug('Computing forwards FFT')
 
@@ -144,8 +157,6 @@ cdef class SphericalVoids:
         logger.debug('Computing inverse FFT')
 
         # align arrays
-        # delta_in = pyfftw.empty_aligned(self.delta.shape, dtype='complex64')
-        # delta_out  = pyfftw.empty_aligned([len(self.delta)] * 3, dtype='float32')
         delta_in  = pyfftw.empty_aligned((self.delta.shape[0], 
                                           self.delta.shape[1], 
                                           self.delta.shape[2]//2+1), dtype='complex64')
@@ -465,7 +476,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=0., int threads=0):
+    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=0):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -485,7 +496,7 @@ cdef class SphericalVoids:
 
         # cdef float[:] Radii=np.array(radii, dtype=np.float32)
         # cdef np.ndarray[np.float32_t, ndim=3] delta=self.delta
-        cdef np.ndarray[float, ndim=1] Radii=np.array(radii, dtype=np.float32)
+        cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
         cdef float R, R_grid, R_grid2, Rmin
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
@@ -512,6 +523,9 @@ cdef class SphericalVoids:
         cdef int kxx, kyy, kzz, kx, ky, kz, kx2, ky2, kz2
         cdef np.complex64_t[:,:,::1] delta_k
 
+        # set maximum density threshold for cell to be classified as void
+        self.void_delta = void_delta
+
         # set default radii if not provided
         if radii[0] == 0.:
             # ~2-10x cellsize in logarithmic spacing
@@ -524,8 +538,8 @@ cdef class SphericalVoids:
             # ~2-8x average galaxy separation in linear spacing
             Radii = np.linspace(8, 2, 19, dtype=np.float32) * self.r_sep
             # self.Radii = np.array(Radii)[np.array(Radii) > self.cellsize]  # ensure radii larger than cellsize
-            self.Radii = Radii[Radii > self.cellsize]  # ensure radii larger than cellsize
-            logger.debug(f'Radii set by default')
+            self.Radii = Radii[(Radii > self.cellsize) & (Radii > self.rmin_spurious())]  # ensure radii larger than cellsize and detection limit of spurious voids
+            logger.debug(f'Radii set by default: cellsize={self.cellsize:.2f}, Rmin_spurious={self.rmin_spurious():.2f}.')
         else:
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
@@ -533,14 +547,13 @@ cdef class SphericalVoids:
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
 
-        # set maximum density threshold for cell to be classified as void
-        self.void_delta = void_delta
         # set allowed void overlap for void classification
         if type(void_overlap) is bool: 
             self.void_overlap = 0.
         else:
             self.void_overlap = void_overlap
             void_overlap = False
+        logger.debug(f"Overlap set to {void_overlap} (value={self.void_overlap})")
         # set dimensions
         xdim, ydim, zdim = self.nmesh
         yzdim = ydim * zdim
@@ -550,9 +563,11 @@ cdef class SphericalVoids:
 
         # check mesh resolution is equal along each axis
 
-        # check that minimum radius is larger than grid resolution
+        # check that radii are compatible with grid resolution
         if Rmin<self.cellsize:
             raise Exception(f"Minimum radius {Rmin:.1f} is below cellsize {self.cellsize:.1f}")
+        # if (abs(np.diff(self.Radii))<self.cellsize).any():
+            # raise Exception(f"Radii are binned too finely for cellsize {self.cellsize:.1f}")
 
         # determine mesh volume
         vol_mesh = self.cellsize**3 * nmesh_tot
@@ -597,6 +612,8 @@ cdef class SphericalVoids:
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
             delta_sm = self._smoothing(R)  # single precision smoothing
             # delta_sm = gaussian_smoothing(self.delta, self.boxsize[0], R, self.threads)
+            # delta_sm = uniform_filter(self.delta, size=R/self.cellsize)
+            # delta_sm = gaussian_filter(self.delta, R/self.cellsize)
 
             # check void cells are present at this radius
             if np.min(delta_sm)>self.void_delta:
@@ -654,7 +671,7 @@ cdef class SphericalVoids:
                 if not void_overlap:
                     if mode==0:
                         # detect nearby voids using distances between centres
-                        nearby_voids = num_voids_around1(self.void_overlap, void_overlap, total_voids_found, 
+                        nearby_voids = num_voids_around1(self.void_overlap, total_voids_found, 
                                                          xdim, ydim, zdim, i, j, k, 
                                                          &void_rad[0], &void_pos[0,0], 
                                                          R_grid, threads2)
@@ -701,12 +718,12 @@ cdef class SphericalVoids:
         for i in range(bins-1):
             norm = 1 / (np.prod(self.boxsize) * log(self.Radii[i] / self.Radii[i+1]))
             vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
-            vsf[1,i] = Nvoids[i] * norm  # vsf
-            vsf[2,i] = sqrt(Nvoids[i]) * norm  # poisson uncertainty
-        
+            vsf[1,i] = Nvoids[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
+            vsf[2,i] = sqrt(Nvoids[i+1]) * norm  # poisson uncertainty
 
         # finish by setting the class fields
-        position = np.asarray(void_pos[:total_voids_found], dtype=np.float32) + 0.5  # void positions on mesh
+        # position = np.asarray(void_pos[:total_voids_found], dtype=np.float32) + 0.5  # void positions on mesh
+        position = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
         box_shift = np.asarray(self.boxcenter, dtype=np.float32) - np.asarray(self.boxsize, dtype=np.float32)/2 
         # self.void_position = np.zeros_like(void_pos[:total_voids_found], dtype=np.float32)
         # for i in range(3):
