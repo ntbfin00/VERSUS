@@ -487,7 +487,7 @@ cdef class SphericalVoids:
             List of void radii to search for. Defaults to 4-104x cellsize.
 
         void_delta: float, default=-0.8
-            Maximum overdensity threshold to be classified as void.
+            Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
 
         void_overlap: float, default=0.
             Maximum allowed volume fraction of void overlap.
@@ -526,6 +526,16 @@ cdef class SphericalVoids:
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
 
+        # find peaks
+        if void_delta>0: 
+            fact = -1.
+            void_delta *= -1
+            vf_type, sign = ('peak', '>')
+        # find voids
+        else:
+            fact = 1.
+            vf_type, sign = ('void', '>')
+
         # set default radii if not provided
         if radii[0] == 0.:
             # ~2-10x cellsize in logarithmic spacing
@@ -559,7 +569,7 @@ cdef class SphericalVoids:
         yzdim = ydim * zdim
         # set threads
         self.threads = os.cpu_count() if threads==0 else threads
-        logger.info(f'Running spherical void-finder with {self.threads} threads')
+        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads')
 
         # check mesh resolution is equal along each axis
 
@@ -610,14 +620,16 @@ cdef class SphericalVoids:
 
             R = self.Radii[q]
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
-            delta_sm = self._smoothing(R)  # single precision smoothing
+
+            delta_sm = fact * self._smoothing(R)  # single precision smoothing
+
             # delta_sm = gaussian_smoothing(self.delta, self.boxsize[0], R, self.threads)
             # delta_sm = uniform_filter(self.delta, size=R/self.cellsize)
             # delta_sm = gaussian_filter(self.delta, R/self.cellsize)
 
             # check void cells are present at this radius
-            if np.min(delta_sm)>self.void_delta:
-                logger.info(f'No cells with delta < {self.void_delta:.2f} for R={R:.1f} Mpc/h')
+            if np.min(delta_sm)>void_delta:
+                logger.info(f'No cells with delta {sign} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
                 continue
 
             # IDs = self._find_underdensities(delta_sm, in_void, delta_v, IDs, xdim, ydim, zdim, yzdim, &local_voids)
@@ -627,11 +639,11 @@ cdef class SphericalVoids:
                 for j in range(ydim):
                     for k in range(zdim):
 
-                        if delta_sm[i,j,k]<self.void_delta and in_void[i,j,k]==0:
+                        if delta_sm[i,j,k]<void_delta and in_void[i,j,k]==0:
                             IDs[local_voids]     = yzdim*i + zdim*j + k
                             delta_v[local_voids] = delta_sm[i,j,k]
                             local_voids += 1
-            logger.debug(f'Found {local_voids} cells with delta < {self.void_delta:.2f}')
+            logger.debug(f'Found {local_voids} cells with delta {sign} {self.void_delta:.2f}')
 
             # sort delta_v by density
             indexes = np.argsort(delta_v[:local_voids])

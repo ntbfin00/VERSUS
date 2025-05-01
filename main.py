@@ -23,7 +23,7 @@ def parse_args():
                         help="Provide dictionary of reconstruction arguments - 'f','bias','los','smoothing_radius','recon_pad','engine'.")
     parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide dictionary of cellsize, r_sep, boxsize, boxcenter and box-like.")
     parser.add_argument('--radii', default=[0.], nargs='+', help="List of void radii to detect. Can be passed as dictionary of arguments to np.linspace or np.arange, e.g. \"{'start': 20, 'stop': 50, 'num (or step)': 10}\"")
-    parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void")
+    parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
     parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
     parser.add_argument('--smoothing', type=float, default=0., help="Radius (as fraction of galaxy separation) to preliminarily smooth data and random fields before computing density.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
