@@ -27,8 +27,8 @@ def parse_args():
     parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
     parser.add_argument('--smoothing', type=float, default=0., help="Radius (as fraction of galaxy separation) to preliminarily smooth data and random fields before computing density.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
-    parser.add_argument('--threads', type=int, default=0, 
-                        help="Number of threads used for multi-threaded processes. Defaults to maximum available.")
+    parser.add_argument('--threads', type=int, default=8, 
+                        help="Number of threads used for multi-threaded processes. if set to zero, defaults to number of available CPUs.")
     parser.add_argument('--dryrun', required=False, action='store_true',help="Run script without saving outputs")
 
     args = parser.parse_args()

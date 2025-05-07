@@ -476,7 +476,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=0):
+    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -491,6 +491,9 @@ cdef class SphericalVoids:
 
         void_overlap: float, default=0.
             Maximum allowed volume fraction of void overlap.
+
+        threads: int, default=8
+            Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
         """
 
 
@@ -724,7 +727,7 @@ cdef class SphericalVoids:
             void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
             logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f})'.format(void_cell_fraction, void_volume_fraction))
 
-        logger.info(f'{total_voids_found} total voids found.')
+        logger.info(f'{total_voids_found} total {vf_type}s found.')
         logger.info('Occupied void volume fraction = {:.3f} (expected {:.3f})'.format(void_cell_fraction, void_volume_fraction))
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(bins-1):
