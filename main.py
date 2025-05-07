@@ -18,7 +18,7 @@ def parse_args():
                         help="Array or path to density mesh. If not None and data also provided, save to path provided (True for default path).")
     parser.add_argument('--cellsize', type=float, default=4., help="Size of mesh cells.")
     parser.add_argument('--reconstruct', required=False, type=str, default=None, 
-                        help="Type of reconstruction ('disp', 'rsd' or 'disp+rsd'), growth rate and bias. Defaults to no reconstruction.")
+                        help="Type of reconstruction ('disp', 'rsd' or 'disp+rsd'), growth rate and bias. Defaults to no reconstruction. Must additionally provide 'f' and 'bias' in recon_args.")
     parser.add_argument('--recon_args', required=False, nargs='+', default=None,
                         help="Provide dictionary of reconstruction arguments - 'f','bias','los','smoothing_radius','recon_pad','engine'.")
     parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide dictionary of cellsize, r_sep, boxsize, boxcenter and box-like.")

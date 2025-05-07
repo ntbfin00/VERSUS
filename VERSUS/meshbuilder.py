@@ -31,7 +31,7 @@ class DensityMesh:
         Mesh data type.
 
     reconstruct: string
-        Type of reconstruction to run - 'disp', 'rsd' or 'disp+rsd'. Defaults to no reconstruction.
+        Type of reconstruction to run - 'disp', 'rsd' or 'disp+rsd'. Defaults to no reconstruction. Must additionally provide 'f' and 'bias' in recon_args.
 
     recon_args: dict
         Reconstruction arguments - 'f', 'bias', 'engine', 'los' (only required for box), 'smoothing radius' and 'recon_pad'.
@@ -50,7 +50,7 @@ class DensityMesh:
         logger.debug(f'Data type: {self.dtype}')
         # set reconstruction parameters
         self.reconstruct = reconstruct
-        self.recon_args = {'f': 0.8, 'bias': 2.} if recon_args is None else recon_args
+        self.recon_args = {} if recon_args is None else recon_args
         # default options to read data column headers
         if data_cols is None:
             data_cols = ['X','Y','Z'] if self.box_like else ['RA','DEC','Z']
@@ -184,20 +184,22 @@ class DensityMesh:
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
         # calculate mesh overdensity
-        r_smooth = smoothing_radius * self.r_sep  # smoothing as a function of density
-        if smoothing_radius > 0.: logger.info(f"Applying {r_smooth:.1f} Mpc smoothing to data and random fields.")
-        mesh.set_density_contrast(smoothing_radius=r_smooth, **kwargs)
+        if smoothing_radius > 0.: logger.info(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
+        mesh.set_density_contrast(smoothing_radius=smoothing_radius, **kwargs)
 
 
-    def run_recon(self, f=0.8, bias=2, engine='IterativeFFTReconstruction', los='z', 
+    def run_recon(self, f=None, bias=None, engine='IterativeFFTReconstruction', los='z', 
                   recon_pad=1.1, smoothing_radius=15., field='rsd', **kwargs):
         r"""
         Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
         """
 
+        if f is None or bias is None:
+            raise Exception("Minimally 'f' and 'bias' must be provided for density field reconstruction")
+
         if not self.box_like: los = None  # survey has local line-of-sight
 
-        logger.info(f"Running {field} reconstruction with {engine}")
+        logger.info(f"Running '{field}' reconstruction with {engine}")
         logger.info(f"Recon parameters: f={f:.1f}, b={bias:.1f}, los={los}, r_smooth={smoothing_radius}, pad={recon_pad}")
         # set and smooth mesh
         self.data_mesh = self._set_mesh(f=f, bias=bias, engine=engine, cellsize=self.cellsize, los=los,
