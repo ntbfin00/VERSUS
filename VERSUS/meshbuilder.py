@@ -34,7 +34,7 @@ class DensityMesh:
         Type of reconstruction to run - 'disp', 'rsd' or 'disp+rsd'. Defaults to no reconstruction. Must additionally provide 'f' and 'bias' in recon_args.
 
     recon_args: dict
-        Reconstruction arguments - 'f', 'bias', 'engine', 'los' (only required for box), 'smoothing radius' and 'recon_pad'.
+        Reconstruction arguments - 'f', 'bias', 'los' (only required for box), 'engine' and 'smoothing radius'.
 
     kwargs : dict
         Optional arguments.
@@ -131,7 +131,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTReconstruction', cellsize=1., boxpad=1., **kwargs):
+    def _set_mesh(self, engine='IterativeFFTReconstruction', cellsize=1., boxpad=1.1, **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -152,6 +152,7 @@ class DensityMesh:
         if self.box_like:
             positions = self.data_positions
             wrap = True
+            boxpad = 1.
         else:
             positions = self.random_positions
             wrap = False
@@ -188,8 +189,8 @@ class DensityMesh:
         mesh.set_density_contrast(smoothing_radius=smoothing_radius, **kwargs)
 
 
-    def run_recon(self, f=None, bias=None, engine='IterativeFFTReconstruction', los='z', 
-                  recon_pad=1.1, smoothing_radius=15., field='rsd', **kwargs):
+    def run_recon(self, f=None, bias=None, los=None, engine='IterativeFFTReconstruction', 
+                  boxpad=1.1, smoothing_radius=15., field='rsd', **kwargs):
         r"""
         Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
         """
@@ -197,13 +198,16 @@ class DensityMesh:
         if f is None or bias is None:
             raise Exception("Minimally 'f' and 'bias' must be provided for density field reconstruction")
 
+        if self.box_like and los is None:
+            raise Exception("'los' must be provided for density field reconstruction of box-like data")
         if not self.box_like: los = None  # survey has local line-of-sight
 
+
         logger.info(f"Running '{field}' reconstruction with {engine}")
-        logger.info(f"Recon parameters: f={f:.1f}, b={bias:.1f}, los={los}, r_smooth={smoothing_radius}, pad={recon_pad}")
+        logger.info(f"Recon parameters: f={f:.2f}, b={bias:.2f}, los={los}, r_smooth={smoothing_radius}")
         # set and smooth mesh
         self.data_mesh = self._set_mesh(f=f, bias=bias, engine=engine, cellsize=self.cellsize, los=los,
-                                        boxpad=recon_pad, fft_engine='fftw', fft_plan='estimate', **kwargs)
+                                        boxpad=boxpad, fft_engine='fftw', fft_plan='estimate', **kwargs)
         self._set_mesh_density(self.data_mesh, smoothing_radius=smoothing_radius)
         # run reconstruction
         logger.debug(f"Reconstruction running on {self.data_mesh.nmesh} mesh.")
@@ -278,7 +282,7 @@ class DensityMesh:
 
         Parameters
         ----------
-        pad : float, default=1.1
+        boxpad : float, default=1.1
             Padding factor for survey mesh. Simulation box has no padding.
 
         cellsize: float, default=4.
@@ -303,12 +307,12 @@ class DensityMesh:
         if (self.rho_mean * self.cellsize**3)>1: logger.warning("Cellsize exceeds one galaxy per cell. Mesh is no longer shot-noise dominated.")
 
         # run optional reconstruction
-        if self.reconstruct is not None: self.run_recon(field=self.reconstruct, **self.recon_args)
+        if self.reconstruct is not None: self.run_recon(field=self.reconstruct, boxpad=boxpad, **self.recon_args)
 
         # generate mesh
         mesh = self._set_mesh(cellsize=self.cellsize,
                               engine='IterativeFFTParticleReconstruction', # faster when smoothing is not required
-                              boxpad=1. if self.box_like else boxpad, # pad survey to better detect boundary voids
+                              boxpad=boxpad, # pad if survey to better detect boundary voids
                               bias=1.)  # bias set to 1. so voids are found on galaxy (not matter) field
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
