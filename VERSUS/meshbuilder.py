@@ -185,12 +185,12 @@ class DensityMesh:
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
         # calculate mesh overdensity
-        if smoothing_radius > 0.: logger.info(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
+        if smoothing_radius > 0.: logger.debug(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
         mesh.set_density_contrast(smoothing_radius=smoothing_radius, **kwargs)
 
 
     def run_recon(self, f=None, bias=None, los=None, engine='IterativeFFTReconstruction', 
-                  boxpad=1.1, smoothing_radius=15., field='rsd', **kwargs):
+                  boxpad=1.1, smoothing_radius=10., field='rsd', **kwargs):
         r"""
         Perform reconstruction on galaxy positions using pyrecon (https://github.com/cosmodesi/pyrecon.git)
         """
@@ -313,7 +313,8 @@ class DensityMesh:
         mesh = self._set_mesh(cellsize=self.cellsize,
                               engine='IterativeFFTParticleReconstruction', # faster when smoothing is not required
                               boxpad=boxpad, # pad if survey to better detect boundary voids
-                              bias=1.)  # bias set to 1. so voids are found on galaxy (not matter) field
+                              bias=1.,  # bias set to 1. so voids are found on galaxy (not matter) field
+                              resampler='ngp')  # Do not perform 'smoothing' during particle assignment to mesh
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
         self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 

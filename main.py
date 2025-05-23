@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--radii', default=[0.], nargs='+', help="List of void radii to detect. Can be passed as dictionary of arguments to np.linspace or np.arange, e.g. \"{'start': 20, 'stop': 50, 'num (or step)': 10}\"")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
     parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
-    parser.add_argument('--smoothing', type=float, default=0., help="Radius (as fraction of galaxy separation) to preliminarily smooth data and random fields before computing density.")
+    # parser.add_argument('--smoothing', type=float, default=0., help="Radius (as fraction of galaxy separation) to preliminarily smooth data and random fields before computing density.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=8, 
                         help="Number of threads used for multi-threaded processes. if set to zero, defaults to number of available CPUs.")
@@ -76,7 +76,7 @@ def main():
     # initialise void finder with command-line arguments
     VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
                         delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
-                        cellsize=args.cellsize, smoothing_radius=args.smoothing,
+                        cellsize=args.cellsize, #smoothing_radius=args.smoothing,
                         reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
