@@ -1,4 +1,4 @@
-from setuptools import setup, Extension
+from setuptools import setup, Extension, find_packages
 from Cython.Build import cythonize
 import numpy
 from platform import machine, system
@@ -24,6 +24,7 @@ extensions = [
 
 setup(
     name="VERSUS",  # Name of the project
+    packages=find_packages(),
     ext_modules=cythonize(
         extensions,
         compiler_directives={'language_level': "3"},

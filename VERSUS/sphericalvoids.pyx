@@ -86,9 +86,7 @@ cdef class SphericalVoids:
         # load delta mesh
         elif delta_mesh is not None:
             if isinstance(delta_mesh, DensityMesh):
-                logger.info("Density mesh type")
                 if not hasattr(delta_mesh, 'delta'):
-                    logger.info("Creating mesh")
                     delta_mesh.create_mesh(**kwargs)
                 self.delta = delta_mesh.delta
                 self.nmesh = delta_mesh.nmesh
@@ -98,7 +96,7 @@ cdef class SphericalVoids:
                 self.boxcenter = delta_mesh.boxcenter
                 self.box_like = delta_mesh.box_like
                 logger.debug(f"Mesh data type: {delta_mesh.dtype}")
-            if type(delta_mesh) is str:
+            elif type(delta_mesh) is str:
                 self.load_mesh(delta_mesh)
             else:
                 if not all([arg in mesh_args for arg in ['cellsize', 'r_sep', 'boxsize', 'boxcenter', 'box_like']]):
@@ -207,10 +205,81 @@ cdef class SphericalVoids:
 
         return delta_sm
 
+#################################################################
+
+    # @cython.boundscheck(False)
+    # @cython.cdivision(True)
+    # @cython.wraparound(False)
+    # cdef _deconvolve_MAS(self, str resample):
+        # r"""
+        # Smooth density field with top-hat filter
+
+        # Parameters
+        # ----------
+
+        # radius: float
+            # Smoothing radius of top-hat filter.
+        # """
+
+        # cdef float prefact, kL, fact, Wx, Wy, Wz
+        # cdef int i, j, k, xdim, ydim, zdim
+        # cdef np.float32_t[::1] kx, ky, kz
+        # cdef np.complex64_t[:,:,::1] delta_k
+
+        # # Select window power based on MAS used
+        # if resample == 'ngp':
+            # n = 1
+        # elif resample == 'cic':
+            # n = 2
+        # elif resample == 'tsc':
+            # n = 3
+        # elif resample == 'psc':
+            # n = 4
+        # else:
+            # raise Exception(f"MAS {resample} not recognised. Select from ['ngp', 'cic', 'tsc', 'psc']")
+
+        # xdim, ydim, zdim = self.nmesh
+        # # compute FFT of field
+        # delta_k = self.FFT3Dr()
+
+        # # loop over Fourier modes
+        # logger.debug('Looping over fourier modes')
+        # kx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')
+        # ky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')
+        # kz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')
+
+        # prefact = np.pi * self.cellsize
+        # for i in prange(xdim, nogil=True):
+            # if i>0: Wx = sin(prefact * kx[i]) / (prefact * kx[i])
+            # else: Wx = 1
+            # for j in range(ydim):
+                # if j>0: Wy = sin(prefact * ky[j]) / (prefact * ky[j])
+                # else: Wy = 1
+                # for k in range(zdim//2 + 1):
+                    # if k>0: Wz = sin(prefact * kz[k]) / (prefact * kz[k])
+                    # else: Wz = 1
+
+                    # # skip when kx, ky and kz equal zero
+                    # if i==0 and j==0 and k==0:
+                        # continue 
+
+                    # fact = pow(Wx * Wy * Wz, n)
+                    # delta_k[i,j,k] =  delta_k[i,j,k] / fact
+
+        # delta_sm = self.IFFT3Dr(delta_k)
+
+        # # reset survey mask
+        # if not self.box_like:
+            # delta_sm = self._reset_survey_mask(delta_sm)
+            # # self._reset_survey_mask(&delta_sm)
+
+        # return delta_sm
+#############################################################
+
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    cdef _smoothing(self, float radius):
+    def _smoothing(self, float radius):
         r"""
         Smooth density field with top-hat filter
 
@@ -237,6 +306,9 @@ cdef class SphericalVoids:
         kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
 
         prefact = 2.0 * np.pi * radius
+        # prefact = 2.0 * np.pi * radius / 2000
+        # kkx  = np.array([i-xdim if (i>xdim//2) else i for i in range(xdim)]).astype('f4')**2
+        # kky = kkz = kkx
         for i in prange(xdim, nogil=True):
             for j in range(ydim):
                 for k in range(zdim//2 + 1):
@@ -317,6 +389,12 @@ cdef class SphericalVoids:
         cdef float prefact,kR,fact
         cdef int kxx, kyy, kzz, kx, ky, kz, kx2, ky2, kz2
         cdef np.complex64_t[:,:,::1] delta_k
+
+        # # deconvolve MAS from density grid
+        # logger.info("Deconvolving MAS")
+        # self.delta = self._deconvolve_MAS("ngp")
+        # logger.info(f"Initial smoothing of {0.4*self.r_sep}Mpc")
+        # self.delta = self._smoothing(0.4*self.r_sep)
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta

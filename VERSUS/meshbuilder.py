@@ -150,10 +150,14 @@ class DensityMesh:
 
         # use galaxies (or randoms for survey) to estimate boxsize if not supplied
         if self.box_like:
-            positions = self.data_positions
+            boxsize = self.data_positions.max(axis=0) - self.data_positions.min(axis=0)
+            boxcenter = (self.data_positions.max(axis=0) + self.data_positions.min(axis=0)) / 2
+            nmesh = boxsize // cellsize // 2 * 2  # ensure boxsize is divisible by even number of cells
+            cellsize = positions = None
             wrap = True
             boxpad = 1.
         else:
+            boxsize = boxcenter = nmesh = None
             positions = self.random_positions
             wrap = False
 
@@ -161,8 +165,10 @@ class DensityMesh:
         exec(f"from pyrecon import {engine}; Recon = {engine}", globals())
 
         # initialise mesh
-        mesh = Recon(positions=positions, cellsize=cellsize, wrap=wrap,
-                     boxpad=boxpad, dtype=self.dtype, **kwargs)
+        mesh = Recon(positions=positions, cellsize=cellsize, nmesh=nmesh, 
+                     boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, 
+                     wrap=wrap, dtype=self.dtype, **kwargs)
+        logger.debug(f"Boxsize: {mesh.boxsize}, Boxcenter: {mesh.boxcenter}, Cellsize: {mesh.cellsize}")
 
         return mesh
 
@@ -185,7 +191,7 @@ class DensityMesh:
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
         # calculate mesh overdensity
-        if smoothing_radius > 0.: logger.debug(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
+        if smoothing_radius > 0.: logger.info(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
         mesh.set_density_contrast(smoothing_radius=smoothing_radius, **kwargs)
 
 
