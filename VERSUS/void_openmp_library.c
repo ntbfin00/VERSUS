@@ -3,6 +3,82 @@
 #include <omp.h>
 #include <math.h>
 
+float check_real_space_wrap(float *delta, int Ncells, int xdim, int ydim, int zdim, 
+		            int yzdim, float R_grid2, int i, int j, int k, int threads)
+{
+  int l, m, n, i1, j1, k1;
+  long number;
+  float dist2, delta_enc=0;
+
+#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim)
+  for (l=-Ncells; l<=Ncells; l++)
+    {
+      //i1 = (i+l+dims)%dims;
+      i1 = i+l;
+      if (i1>=xdim) i1 = i1-xdim;
+      if (i1<0)     i1 = i1+xdim;
+		      
+      for (m=-Ncells; m<=Ncells; m++)
+	{
+	  //j1 = (j+m+dims)%dims;
+	  j1 = j+m;
+	  if (j1>=ydim) j1 = j1-ydim;
+	  if (j1<0)     j1 = j1+ydim;
+
+	  for (n=-Ncells; n<=Ncells; n++)
+	    {
+	      //k1 = (k+n+dims)%dims;
+	      k1 = k+n;
+	      if (k1>=zdim) k1 = k1-zdim;
+	      if (k1<0)     k1 = k1+zdim;
+
+	      dist2 = l*l + m*m + n*n;
+	      if (dist2<R_grid2)
+		{
+		  number = yzdim*i1 + zdim*j1 + k1;
+#pragma omp atomic
+		  delta_enc += delta[number];
+		}
+	    }
+	}
+    } 
+  return delta_enc;
+}
+
+
+float check_real_space(float *delta, int Ncells, int xdim, int ydim, int zdim, 
+		       int yzdim, float R_grid2, int i, int j, int k, int threads)
+{
+  int l, m, n, i1, j1, k1;
+  long number;
+  float dist2, delta_enc=0;
+
+#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim)
+  for (l=-Ncells; l<=Ncells; l++)
+    {
+      i1 = i+l;
+		      
+      for (m=-Ncells; m<=Ncells; m++)
+	{
+	  j1 = j+m;
+
+	  for (n=-Ncells; n<=Ncells; n++)
+	    {
+	      k1 = k+n;
+
+	      dist2 = l*l + m*m + n*n;
+	      if (dist2<R_grid2)
+		{
+		  number = yzdim*i1 + zdim*j1 + k1;
+#pragma omp atomic
+		  delta_enc += delta[number];
+		}
+	    }
+	}
+    } 
+  return delta_enc;
+}
+
 
 // Determine the volume overlap fraction between two spheres
 // Rv - Radius of previously detected void, Rc - Radius of void candidate, d2 - Squared distance between void and candidate centres.
