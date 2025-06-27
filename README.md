@@ -5,61 +5,45 @@ Void-finding with optional real-space reconstruction for use with both simulated
 - Voxel based voids
 - Zobov based voids
 
-```example_config.yaml``` provides all the config options for running from the command line.
-
 ## Requirements
 
-Minimal requirements:
-- Pyrecon
-- Astropy
-- PyCall.jl
-- FFTW.jl
-- Parameters.jl
-- Printf.jl
+- pyrecon
+- astropy
+- pyfftw
+- argparse
 
-To run from command line:
-- ArgParse.jl
-- YAML.jl
-- FITSIO.jl
-- DelimitedFiles.jl
+## Installation
+Clone the repository:
+```
+git clone https://github.com/ntbfin00/VERSUS.git
+```
+Setup the package:
+```
+python setup.py build_ext --inplace
+```
+
 
 ## Usage
-Run reconstruction on galaxy positions:
+Command line:
 ```
-cosmo = Cosmology(; **kwargs)  # LambdaCDM cosmology
-
-# if conversion from sky to cartesian positions required
-<xyz positions> = to_cartesian(cosmo, <rdz positions>)
-
-cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
-recon_par = MeshParams(; **kwargs)
-
-cat_recon = reconstruction(cosmo, cat, recon_par)
+python main.py --data <fits file> [--random <fits file>] [--data_weights <array>] [--random_weights <array>] [--columns <list>] [--radii <list>] [--threads <int>]
 ```
+If randoms are supplied from command line, VERSUS will run in survey (not simulation box) mode. See ```python main.py --help``` for full list of inputs.
 
-Run void finding:
+Module:
 ```
-cat = GalaxyCatalogue(<xyz galaxy positions>, [<galaxy weights>], [<xyz random positions>], [<random weights>])
-mesh_par = MeshParams(; **kwargs)
+from VERSUS.sphericalvoids import SphericalVoids
 
-# e.g. Spherical voidfinder
-vf_par = SphericalVoidParams(; **kwargs)
-vf = SphericalVoids.voidfinder(cat, mesh_par, vf_par)
+VF = SphericalVoids(data_positions=<path or 3D array>, data_weights=<1D array>,                                                                          random_positions=<path or 3D array>, random_weights=<1D array>,
+                    data_cols=<list>, save_mesh=<bool or path>)
+
+VF.run_voidfinding(radii, **void_finder_kwargs)
 
 # or to supply a precomputed mesh use...
-vf = SphericalVoids.voidfinder(<3D delta array>, <side length>, <1D mesh centre array>, vf_par)
+vf = SphericalVoids(delta_mesh=<path/to/mesh>, ...)
 
 # Output:
-vf.type       # void type
-vf.positions  # void positions
-vf.radii      # void radii
-vf.vsf        # void size function (r, vsf)
+vf.void_position  # void positions
+vf.void_radius    # void radii
+vf.vsf            # void size function (r, vsf, error)
 ```
-
-Run reconstruction and void finding direct from command line:
-```
-julia [-t <n_threads>] --project=<path/to/directory> VERSUS.jl --config <yaml file> --data <fits file> [--randoms <fits file>]
-```
-If randoms are supplied from command line, VERSUS will run in survey (not simulation box) mode.
-
-To supply a pre-computed mesh (instead of galaxy positions) from command line, set ```input["build_mesh"] = false``` in config file and provide FITS file (primary HDU: 3D mesh, secondary HDU: ```box_length``` and ```box_centre``` arrays)  in ```--data``` argument.
