@@ -1,9 +1,6 @@
 # VERSUS
-### Void Extraction in Real-space from SUrveys and Simulations
-Void-finding with optional real-space reconstruction for use with both simulated data and survey data. The following void-types will be implemented:
-- Spherical based voids (based on [Pylians3](https://github.com/franciscovillaescusa/Pylians3))
-- Voxel based voids
-- Zobov based voids
+### Void Extraction in Real-space of Spherical UnderdensitieS
+Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adaptation of the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) code.
 
 ## Requirements
 
