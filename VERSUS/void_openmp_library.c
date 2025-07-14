@@ -4,13 +4,15 @@
 #include <math.h>
 
 float check_real_space_wrap(float *delta, int Ncells, int xdim, int ydim, int zdim, 
-		            int yzdim, float R_grid2, int i, int j, int k, int threads)
+			    int yzdim, float R_grid2, int i, int j, int k, int threads)
 {
-  int l, m, n, i1, j1, k1;
+  int l, m, n, i1, j1, k1, N=0;
   long number;
-  float dist2, delta_enc=0;
+  float dist2, delta_enc=0, Nfill;
 
-#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim)
+/*#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim)*/
+  #pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) \
+                       reduction(+:delta_enc, N)
   for (l=-Ncells; l<=Ncells; l++)
     {
       //i1 = (i+l+dims)%dims;
@@ -38,20 +40,23 @@ float check_real_space_wrap(float *delta, int Ncells, int xdim, int ydim, int zd
 		  number = yzdim*i1 + zdim*j1 + k1;
 #pragma omp atomic
 		  delta_enc += delta[number];
+		  N += 1;
 		}
 	    }
 	}
     } 
-  return delta_enc;
+  /*Nfill = (4 * M_PI * R_grid2 * sqrt(R_grid2) / 3) - N;*/
+  return delta_enc / N;
+  /*return (delta_enc - Nfill) / (N + Nfill);*/
+  /*return N;*/
 }
-
 
 float check_real_space(float *delta, int Ncells, int xdim, int ydim, int zdim, 
 		       int yzdim, float R_grid2, int i, int j, int k, int threads)
 {
   int l, m, n, i1, j1, k1;
   long number;
-  float dist2, delta_enc=0;
+  float dist2, delta_enc=0, N=0;
 
 #pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim)
   for (l=-Ncells; l<=Ncells; l++)
@@ -72,11 +77,12 @@ float check_real_space(float *delta, int Ncells, int xdim, int ydim, int zdim,
 		  number = yzdim*i1 + zdim*j1 + k1;
 #pragma omp atomic
 		  delta_enc += delta[number];
+		  N += 1;
 		}
 	    }
 	}
     } 
-  return delta_enc;
+  return delta_enc / N;
 }
 
 

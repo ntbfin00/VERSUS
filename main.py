@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument('--mesh', default=None, 
                         help="Array or path to density mesh. If not None and data also provided, save to path provided (True for default path).")
     parser.add_argument('--cellsize', type=float, default=4., help="Size of mesh cells.")
+    parser.add_argument('--res_boost', default=2., help="Factor to boost resolution of void sizing step by using a second high-res density mesh. Set to None for a more memory conserving option.")
     parser.add_argument('--reconstruct', required=False, type=str, default=None, 
                         help="Type of reconstruction ('disp', 'rsd' or 'disp+rsd'), growth rate and bias. Defaults to no reconstruction. Must additionally provide 'f' and 'bias' in recon_args.")
     parser.add_argument('--recon_args', required=False, nargs='+', default=None,
@@ -60,6 +61,8 @@ def parse_args():
     else:
         args.void_overlap = float(args.void_overlap)
 
+    args.res_boost = None if args.res_boost in ['None', 'none'] else float(args.res_boost)
+
     return args
 
 def main():
@@ -76,7 +79,7 @@ def main():
     # initialise void finder with command-line arguments
     VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
                         delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
-                        cellsize=args.cellsize, #smoothing_radius=args.smoothing,
+                        cellsize=args.cellsize, res_boost=args.res_boost,
                         reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding

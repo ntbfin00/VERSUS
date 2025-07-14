@@ -323,6 +323,7 @@ class DensityMesh:
                               resampler='ngp')  # Do not perform 'smoothing' during particle assignment to mesh
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
+        logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
         self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 
         del self.data_positions
         del self.data_weights

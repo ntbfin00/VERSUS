@@ -10,8 +10,7 @@ import logging
 cimport void_openmp_library as VOL
 from .meshbuilder import DensityMesh
 
-# cimport void_openmp_library_TEST as VOL_TEST
-# from void_library import gaussian_smoothing
+# from ctypes import c_float, POINTER
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +46,11 @@ cdef class SphericalVoids:
     """
 
     cdef object delta
+    cdef object delta_HR
     cdef public int[3] nmesh
     cdef public float cellsize
+    # cdef public double cellsize
+    cdef public float res_boost 
     cdef public float r_sep 
     cdef public float[3] boxsize
     cdef public float[3] boxcenter
@@ -64,18 +66,20 @@ cdef class SphericalVoids:
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
-                 dtype='f4', reconstruct=None, recon_args=None, 
+                 res_boost=2, dtype='f4', reconstruct=None, recon_args=None, 
                  delta_mesh=None, mesh_args=None, **kwargs):
 
-        cdef np.ndarray[np.float32_t, ndim=3] delta
+        # cdef np.ndarray[np.float32_t, ndim=3] delta
+        self.res_boost = 1.
 
-        # create delta mesh
+        # create density mesh
         if data_positions is not None:
             mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                random_positions=random_positions, random_weights=random_weights, data_cols=data_cols, 
                                dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
             mesh.create_mesh(**kwargs)
             self.delta = mesh.delta
+            # self.delta = np.ascontiguousarray(mesh.delta, dtype=np.float32)
             self.nmesh = mesh.nmesh
             self.cellsize = mesh.cellsize
             self.r_sep = mesh.r_sep
@@ -83,6 +87,19 @@ cdef class SphericalVoids:
             self.boxcenter = mesh.boxcenter
             self.box_like = mesh.box_like
             logger.debug(f"Mesh data type: {mesh.dtype}")
+
+            # create secondary high resolution mesh
+            if res_boost is not None:
+                if res_boost <= 1.:
+                    raise Exception('res_boost must be greater than 1')
+                logger.info(f"Boosting resolution of void-sizing step by x{res_boost}")
+                mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
+                                   random_positions=random_positions, random_weights=random_weights, data_cols=data_cols, 
+                                   dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
+                mesh.create_mesh(cellsize=self.cellsize / res_boost)
+                self.delta_HR = mesh.delta
+                self.res_boost = res_boost 
+
         # load delta mesh
         elif delta_mesh is not None:
             if isinstance(delta_mesh, DensityMesh):
@@ -96,13 +113,16 @@ cdef class SphericalVoids:
                 self.boxcenter = delta_mesh.boxcenter
                 self.box_like = delta_mesh.box_like
                 logger.debug(f"Mesh data type: {delta_mesh.dtype}")
-            elif type(delta_mesh) is str:
+            elif type(delta_mesh) is str and delta_mesh.endswith('.fits'):
                 self.load_mesh(delta_mesh)
             else:
                 if not all([arg in mesh_args for arg in ['cellsize', 'r_sep', 'boxsize', 'boxcenter', 'box_like']]):
                     raise Exception('cellsize, r_sep, boxsize, boxcenter and box_like must be provided in addition to delta mesh with mesh_args.')
-                self.delta = delta_mesh
-                self.nmesh = delta_mesh.shape
+                if delta_mesh.endswith('.npy'): 
+                    self.delta = np.load(delta_mesh)
+                else:
+                    self.delta = delta_mesh
+                self.nmesh = self.delta.shape
                 self.cellsize = mesh_args['cellsize']
                 self.r_sep = mesh_args['r_sep']
                 self.boxsize = mesh_args['boxsize']
@@ -111,6 +131,7 @@ cdef class SphericalVoids:
         # ensure either data or mesh is provided
         else:
             raise Exception('Either data_positions or delta_mesh must be provided')
+
 
     def load_mesh(self, mesh_fn):
         r"""
@@ -124,7 +145,6 @@ cdef class SphericalVoids:
 
         f = fits.open(mesh_fn)
         self.delta = f[0].data
-        # self.delta = f[0].data.byteswap().newbyteorder()
         self.nmesh = f[0].data.shape
         self.cellsize = f['cellsize'].data
         self.r_sep = f['r_sep'].data
@@ -236,9 +256,6 @@ cdef class SphericalVoids:
         kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
 
         prefact = 2.0 * np.pi * radius
-        # prefact = 2.0 * np.pi * radius / 2000
-        # kkx  = np.array([i-xdim if (i>xdim//2) else i for i in range(xdim)]).astype('f4')**2
-        # kky = kkz = kkx
         for i in prange(xdim, nogil=True):
             for j in range(ydim):
                 for k in range(zdim//2 + 1):
@@ -289,17 +306,18 @@ cdef class SphericalVoids:
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
         """
 
-
+        # cdef np.ndarray[np.float32_t, ndim=3] delta
         cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
-        cdef float R, R_grid, R_grid2, Rmin
-        cdef int bins, Ncells, nearby_voids, threads2 
+        cdef float R, R_grid, R_grid_HR, R_grid2, R_grid2_HR, Rmin
+        cdef int bins, Ncells, Ncells_HR, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
         cdef long max_num_voids, voids_found, total_voids_found, ID
         cdef float vol_mesh, vol_void, norm
         cdef float[:,:,::1] delta_sm
         cdef long[:,:,::1] in_void
         cdef long[::1] IDs
-        cdef int i, j, k, p, q, xdim, ydim, zdim, yzdim, mode
+        cdef int i, j, k, p, q, mode 
+        cdef int xdim, ydim, zdim, yzdim, xdim_HR, ydim_HR, zdim_HR, yzdim_HR
         cdef int[::1] Nvoids
         cdef double void_cell_fraction, void_volume_fraction=0.0
         cdef float[:,::1] position
@@ -307,16 +325,20 @@ cdef class SphericalVoids:
         cdef float[::1] delta_v, void_rad, box_shift
         cdef float[:,::1] vsf
         cdef long local_voids
-
         cdef long[::1] indexes, IDs_temp
         cdef float[::1] delta_v_temp
-        cdef int dims = self.delta.shape[0]
-        cdef int middle = dims//2
-        cdef float prefact,kR,fact
-        cdef int kxx, kyy, kzz, kx, ky, kz, kx2, ky2, kz2
-        cdef np.complex64_t[:,:,::1] delta_k
+        # cdef int dims = self.delta.shape[0]
+        # cdef int middle = dims//2
+        # cdef float prefact,kR,fact
+        # cdef int kxx, kyy, kzz, kx, ky, kz, kx2, ky2, kz2
+        # cdef np.complex64_t[:,:,::1] delta_k
+        cdef float[:, :, ::1] delta #= self.delta
 
-        cdef np.ndarray[np.float32_t, ndim=3] delta=self.delta  # or high res grid if provided
+        # set mesh for determining void size
+        if self.delta_HR is None:
+            delta = np.ascontiguousarray(self.delta, dtype=np.float32)
+        else:
+            delta = np.ascontiguousarray(self.delta_HR, dtype=np.float32)
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
@@ -362,6 +384,8 @@ cdef class SphericalVoids:
         # set dimensions
         xdim, ydim, zdim = self.nmesh
         yzdim = ydim * zdim
+        xdim_HR, ydim_HR, zdim_HR = (delta.shape[0], delta.shape[1], delta.shape[2])
+        yzdim_HR = ydim_HR * zdim_HR
         # set threads
         self.threads = os.cpu_count() if threads==0 else threads
         logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads')
@@ -417,6 +441,7 @@ cdef class SphericalVoids:
             R = self.Radii[q]
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
 
+            print(self.cellsize)
             delta_sm = fact * self._smoothing(R)  # single precision smoothing
 
             # check void cells are present at this radius
@@ -449,8 +474,12 @@ cdef class SphericalVoids:
             logger.debug('Sorting of underdense cells finished.')
 
             # determine void radius in terms of number of mesh cells
-            R_grid = R/self.cellsize; Ncells = <int>R_grid + 1
-            R_grid2 = R_grid * R_grid
+            R_grid = R / self.cellsize; R_grid_HR = R_grid * self.res_boost
+            # R_grid = round(R / (sqrt(3) * self.cellsize)) * sqrt(3); R_grid_HR = R_grid * self.res_boost
+            # R_grid = R / self.cellsize + 0.2; R_grid_HR = R_grid * self.res_boost
+            # print(R_grid * self.cellsize)
+            Ncells = <int>R_grid + 1; Ncells_HR = <int>R_grid_HR + 1
+            R_grid2 = R_grid * R_grid; R_grid2_HR = R_grid_HR * R_grid_HR
             voids_found = 0 
 
             # select method to identify nearby voids based on radius
@@ -470,8 +499,14 @@ cdef class SphericalVoids:
                 if (self.void_overlap == 0.) and (in_void[i,j,k] > 0): continue
 
                 # validate in spatial domain (mitigate FFT artifacts)
-                delta_enc = check_real_space(&delta[0,0,0], Ncells, 
-                            xdim, ydim, zdim, yzdim, R_grid2, i, j, k, threads=1)
+                delta_enc = check_real_space(&delta[0,0,0], Ncells_HR, 
+                            xdim_HR, ydim_HR, zdim_HR, yzdim_HR, R_grid2_HR, 
+                            <int>(i * self.res_boost), <int>(j * self.res_boost), 
+                            <int>(k * self.res_boost), threads=1)
+                # if p==0: print(delta_enc, delta_sm[i,j,k])
+                # if p==0: 
+                    # RR = [50, 46, 42, 38, 34, 30]
+                    # print(delta_enc * self.cellsize**3 / (4 * np.pi * RR[q]**3 / 3))
                 if (delta_enc > void_delta): continue
                 
                 nearby_voids = 0
@@ -524,4 +559,55 @@ cdef class SphericalVoids:
         self.void_radius   = np.asarray(void_rad[:total_voids_found]) * self.cellsize
         self.void_vsf      = np.asarray(vsf) 
 
+    def checking(delta_py, i, j, k, R):
+        cdef float cellsize, R_grid
+        cdef int xdim, ydim, zdim, yzdim, Ncells
+        cdef float[:, :, ::1] delta
+
+        delta = np.ascontiguousarray(delta_py, dtype=np.float32)
+        xdim = ydim = zdim = delta.shape[0]
+        yzdim = ydim * zdim
+        cellsize = 2000 / xdim
+        R_grid = R / cellsize
+        R_grid2 = R_grid * R_grid
+        Ncells = <int>R_grid + 1
+        check = VOL.check_real_space(&delta[0,0,0], Ncells,
+                                xdim, ydim, zdim, yzdim, R_grid2,
+                                i, j, k, threads=1)
+        return check
+
+    def checking_py(delta_a, i, j, k, R):
+        xdim = ydim = zdim = delta_a.shape[0]
+        yzdim = ydim * zdim
+        cs = 2000 / xdim
+        R_grid = R / cs
+        R_grid2 = R_grid * R_grid
+        Ncells = int(R_grid) + 1
+
+        # delta_b = np.ascontiguousarray(delta_a, dtype=np.float32)
+        # print(delta_b.dtype)
+
+        N = 0
+        delta_enc = 0
+        for l in range(-Ncells, Ncells+1):
+            i1 = i+l
+            if (i1>=xdim): i1 = i1-xdim
+            if (i1<0): i1 = i1+xdim
+            for m in range(-Ncells, Ncells+1):
+                j1 = j+m
+                if (j1>=ydim): j1 = j1-ydim
+                if (j1<0): j1 = j1+ydim
+                for n in range(-Ncells, Ncells+1):
+                    k1 = k+n
+                    if (k1>=zdim): k1 = k1-zdim
+                    if (k1<0): k1 = k1+zdim
+                    dist2 = l*l + m*m + n*n
+                    if (dist2<R_grid2):
+                        number = yzdim*i1 + zdim*j1 + k1
+                        # delta_enc += delta_b.ravel()[number]
+                        delta_enc += delta_a[i1,j1,k1]
+                        N += 1
+
+        check = delta_enc / N
+        return check
 
