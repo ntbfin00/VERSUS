@@ -2,6 +2,8 @@ import numpy as np
 import os
 from astropy.io import fits
 import logging
+from scipy.spatial import cKDTree
+
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +325,10 @@ class DensityMesh:
                               resampler='ngp')  # Do not perform 'smoothing' during particle assignment to mesh
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
+        logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
         self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 
+        self.data_tree = cKDTree(self.data_positions)
+        self.random_tree = None if self.random_positions is None else cKDTree(self.random_positions)
         del self.data_positions
         del self.data_weights
         del self.random_positions
@@ -342,17 +347,18 @@ class DensityMesh:
                 axes = ['nx','ny','nz']
                 nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(mesh.nmesh))
                 save_mesh = os.path.join('mesh', f'mesh_{nbins}_{self.dtype}')
-            # delta mesh
+            # save
             delta_hdu = fits.PrimaryHDU(self.delta)
-            # cellsize
-            cellsize_hdu = fits.ImageHDU(data=[self.cellsize], name='cellsize')
+            # data_tree_hdu = fits.ImageHDU(data=self.data_positions, name='data_positions')
+            # random_tree_hdu = fits.ImageHDU(data=self.random_positions, name='random_positions')
             rsep_hdu = fits.ImageHDU(data=[self.r_sep], name='r_sep')
             boxsize_hdu = fits.ImageHDU(data=self.boxsize, name='boxsize')
             boxcenter_hdu = fits.ImageHDU(data=self.boxcenter, name='boxcenter')
             boxlike_hdu = fits.ImageHDU(data=[int(self.box_like)], name='box_like')
-            # save
             logger.info(f'Saving density mesh to {save_mesh}.fits')
-            hdul = fits.HDUList([delta_hdu, cellsize_hdu, rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
+            # hdul = fits.HDUList([delta_hdu, data_tree, random_tree,
+                                 # rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
+            hdul = fits.HDUList([delta_hdu, rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
             hdul.writeto(f'{save_mesh}.fits', overwrite=True)
             hdul.close()
 
