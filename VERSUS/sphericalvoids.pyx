@@ -9,6 +9,7 @@ from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
 import logging
 cimport void_openmp_library as VOL
 from .meshbuilder import DensityMesh
+from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,14 @@ cdef class SphericalVoids:
         Optional arguments for meshbuilder.DensityMesh object.
     """
 
-    cdef object delta, data_tree, random_tree
+    cdef public object delta, data_tree, random_tree, data_weights, random_weights
     cdef public int[3] nmesh
     cdef public float cellsize
     cdef public float r_sep 
     cdef public float[3] boxsize
     cdef public float[3] boxcenter
     cdef public bint box_like
+    cdef public float volume
     cdef list data_cols
     cdef float[:] Radii
     cdef float void_delta
@@ -58,68 +60,69 @@ cdef class SphericalVoids:
     cdef public object radii
     cdef public object void_position
     cdef public object void_radius
-    cdef public object void_number
+    cdef public object void_count
     cdef public object void_vsf
+    cdef dict __dict__
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
                  dtype='f4', reconstruct=None, recon_args=None, 
                  delta_mesh=None, mesh_args=None, **kwargs):
 
-        cdef np.ndarray[np.float32_t, ndim=3] delta
-
-        self.data_tree = None
-        self.random_tree = None
+        properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
+                      'data_positions', 'random_positions', 'data_weights', 'random_weights']
 
         # create mesh from positions
         if data_positions is not None:
-            mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
-                               random_positions=random_positions, random_weights=random_weights, data_cols=data_cols, 
-                               dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
-            mesh.create_mesh(**kwargs)
-            self.delta = mesh.delta
-            self.data_tree = mesh.data_tree
-            self.random_tree = mesh.random_tree
-            self.nmesh = mesh.nmesh
-            self.r_sep = mesh.r_sep
-            self.boxsize = mesh.boxsize
-            self.boxcenter = mesh.boxcenter
-            self.box_like = mesh.box_like
-            logger.debug(f"Mesh data type: {mesh.dtype}")
+            delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
+                                     random_positions=random_positions, random_weights=random_weights, 
+                                     data_cols=data_cols, dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
+            delta_mesh.create_mesh(**kwargs)
+            for name in properties:
+                if name.endswith('_positions'):
+                    setattr(self, name[:-9] + 'tree', getattr(delta_mesh, name))
+                else:
+                    setattr(self, name, getattr(delta_mesh, name))
         # load mesh
         elif delta_mesh is not None:
             # load mesh from DensityMesh object
             if isinstance(delta_mesh, DensityMesh):
                 if not hasattr(delta_mesh, 'delta'):
                     delta_mesh.create_mesh(**kwargs)
-                self.delta = delta_mesh.delta
-                self.data_tree = delta_mesh.data_tree
-                self.random_tree = delta_mesh.random_tree
-                self.nmesh = delta_mesh.nmesh
-                self.r_sep = delta_mesh.r_sep
-                self.boxsize = delta_mesh.boxsize
-                self.boxcenter = delta_mesh.boxcenter
-                self.box_like = delta_mesh.box_like
-                logger.debug(f"Mesh data type: {delta_mesh.dtype}")
+                for name in properties:
+                    if name.endswith('_positions'):
+                        setattr(self, name[:-9] + 'tree', getattr(delta_mesh, name))
+                    else:
+                        setattr(self, name, getattr(delta_mesh, name))
             # load mesh from DensityMesh file
             elif type(delta_mesh) is str:
                 self.load_mesh(delta_mesh)
             # load mesh from array
             else:
-                if not all([arg in mesh_args for arg in ['cellsize', 'r_sep', 'boxsize', 'boxcenter', 'box_like']]):
-                    raise Exception('cellsize, r_sep, boxsize, boxcenter and box_like must be provided in addition to delta mesh with mesh_args.')
-                logger.warning("data_tree (and random_tree) attributes must be provided in order to mitigate discretness effects. Otherwise output will match Pylians")
+                if mesh_args is None or not all([arg in mesh_args for arg in properties[:5]]):
+                    raise Exception(f'{properties[:5]} must be provided in addition to delta mesh with mesh_args.')
+                logger.warning("data_tree (and random_tree) attributes must be provided along with data_weights (and random_weights) in order to mitigate discretness effects. Otherwise output will match Pylians")
+                for name in properties:
+                    if name in properties[:5]:
+                        setattr(self, name, mesh_args[name])
+                    elif name.endswith('_positions'):
+                        setattr(self, name[:-9] + 'tree', None)
+                    else:
+                        setattr(self, name, None)
                 self.delta = delta_mesh
-                self.nmesh = delta_mesh.shape
-                self.r_sep = mesh_args['r_sep']
-                self.boxsize = mesh_args['boxsize']
-                self.boxcenter = mesh_args['boxcenter']
-                self.box_like = mesh_args['box_like']
         # ensure either data or mesh is provided
         else:
             raise Exception('Either data_positions or delta_mesh must be provided')
 
+        self.nmesh = self.delta.shape
         self.cellsize = self.boxsize[0] / self.nmesh[0]
+        logger.debug(f"Mesh data type: {self.delta.dtype}")
+
+        if self.data_tree is not None:
+            logger.info('Making k-d trees')
+            self.data_tree = cKDTree(self.data_tree, compact_nodes=False, balanced_tree=False,
+                                     boxsize=self.boxsize if self.box_like else None)
+            self.random_tree = None if self.box_like else cKDTree(self.random_tree, compact_nodes=False, balanced_tree=False)
 
     def load_mesh(self, mesh_fn):
         r"""
@@ -131,16 +134,14 @@ cdef class SphericalVoids:
             Path to mesh.
         """
 
-        f = fits.open(mesh_fn)
-        self.delta = f[0].data
-        self.data_tree = f['data_tree'].data
-        self.random_tree = f['random_tree'].data
-        self.nmesh = f[0].data.shape
-        self.r_sep = f['r_sep'].data
-        self.boxsize = f['boxsize'].data
-        self.boxcenter = f['boxcenter'].data
-        self.box_like = f['box_like'].data
-        f.close()
+        with fits.open(mesh_fn) as f:
+            self.delta = f[0].data
+            for name in ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 
+                         'data_positions', 'random_positions', 'data_weights', 'random_weights']:
+                if name.endswith('_positions'):
+                    setattr(self, name[:-9] + 'tree', f[name].data)
+                else:
+                    setattr(self, name, f[name].data)
 
     def rmin_spurious(self):
         r"""
@@ -151,8 +152,7 @@ cdef class SphericalVoids:
         """
 
         rho_mean = 3 / (4 * np.pi * self.r_sep**3)
-        res = self.boxsize[0]/self.nmesh[0]
-        return (np.pi*self.void_delta + 5 / res**0.07 + 0.2) / rho_mean**(1/3) - 3
+        return (2.2 * self.void_delta + 3.6) / rho_mean**(1/3)
 
 
     def FFT3Dr(self):
@@ -189,30 +189,37 @@ cdef class SphericalVoids:
         # put input array into delta_r and perform FFTW
         delta_in [:] = delta_k;  fftw_plan(delta_in, delta_out);  return delta_out
 
-    @cython.boundscheck(False)
-    @cython.cdivision(True)
-    @cython.wraparound(False)
-    cdef _reset_survey_mask(self, np.float32_t[:,:,::1] delta_sm):
-        r"""
-        In-place operation that resets cells outside survey region to mean density.
+    # @cython.boundscheck(False)
+    # @cython.cdivision(True)
+    # @cython.wraparound(False)
+    # cdef _reset_survey_mask(self, delta_sm):
+        # r"""
+        # In-place operation that resets cells outside survey region to mean density.
 
-        Parameters
-        ----------
-        delta_sm: array
-            Smoothed overdensity mesh.
-        """
-        cdef int i, j, k
-        cdef np.float32_t[:,:,::1] d_true = self.delta  
+        # Parameters
+        # ----------
+        # delta_sm: array
+            # Smoothed overdensity mesh.
+        # """
+        # # cdef int i, j, k
+        # # cdef np.float32_t[:,:,::1] d_true = self.delta  
+        # # cdef float[:,:,::1] d_true = self.delta
+
+        # print('delta_sm (in function)', type(delta_sm))
+        # print('self.delta', type(self.delta))
+        # # d_true = self.delta
+        # # print(type(d_true))
         
-        logger.debug('Resetting survey mask')
-        for i in range(self.nmesh[0]):
-            for j in range(self.nmesh[1]):
-                for k in range(self.nmesh[2]):
-                    # if density field outside survey region then set to average density
-                    if d_true[i,j,k] == 0.:
-                        delta_sm[i,j,k] = 0.
+        # logger.debug('Resetting survey mask')
+        # delta_sm[self.delta == 0.0] = 0.0
+        # # for i in range(self.nmesh[0]):
+            # # for j in range(self.nmesh[1]):
+                # # for k in range(self.nmesh[2]):
+                    # # # if density field outside survey region then set to average density
+                    # # if d_true[i,j,k] == 0.:
+                        # # delta_sm[i,j,k] = 0.
 
-        return delta_sm
+        # return delta_sm
 
 
     @cython.boundscheck(False)
@@ -263,7 +270,9 @@ cdef class SphericalVoids:
 
         # reset survey mask
         if not self.box_like:
-            delta_sm = self._reset_survey_mask(delta_sm)
+            logger.info("Resetting survey mask")
+            delta_sm[self.delta == 0.0] = 0.0
+            # delta_sm = self._reset_survey_mask(delta_sm)
             # self._reset_survey_mask(&delta_sm)
 
         return delta_sm
@@ -280,22 +289,26 @@ cdef class SphericalVoids:
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
         # compute factor for density calculation
+        data_w = np.ones(self.data_tree.n) if self.data_weights is None else self.data_weights
         if self.box_like: 
-            fact = (3 * np.prod(self.boxsize)) / (4 * np.pi * self.data_tree.n)
+            fact = 3 * self.volume / (4 * np.pi * data_w.sum())
         else:
-            fact = self.random_tree.n / self.data_tree.n
+            rand_w = np.ones(self.rand_tree.n) if self.rand_weights is None else self.rand_weights
+            fact = rand_w.sum() / data_w.sum()
 
+        # import time
+        # a = time.time()
         Nvoids = np.zeros(self.Radii.size, dtype=np.int32)
         for p in range(self.void_position.shape[0]):
             pos = self.void_position[p]
             for q in range(self.Radii.size):
                 R = self.Radii[q]
 
-                delta_enc = len(self.data_tree.query_ball_point(pos, R))
+                delta_enc = data_w[self.data_tree.query_ball_point(pos, R, workers=self.threads)].sum()
                 if self.box_like: 
                     delta_enc /= R**3
                 else:
-                    delta_enc /= len(self.random_tree.query_ball_point(pos, R))
+                    delta_enc /= rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
                 delta_enc *= fact
                 delta_enc -= 1
 
@@ -304,7 +317,7 @@ cdef class SphericalVoids:
                     Nvoids[q] += 1
                     break
 
-        self.void_number = np.asarray(Nvoids)
+        self.void_count = np.asarray(Nvoids)
         logger.info("Voids resized.")
 
 
@@ -337,7 +350,7 @@ cdef class SphericalVoids:
 
 
         cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
-        cdef float R, R_grid, R_grid2, Rmin
+        cdef float R, R_grid, R_grid2, Rmin, Rspurious
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
         cdef long max_num_voids, voids_found, total_voids_found, ID
@@ -369,6 +382,7 @@ cdef class SphericalVoids:
             vf_type, sign = ('void', '<')
 
         # set default radii if not provided
+        Rspurious = self.rmin_spurious()
         if radii[0] == 0.:
             # ~2-10x cellsize in logarithmic spacing
             # self.Radii = 10**np.arange(1, 0.3, -0.005, dtype=np.float32) * self.cellsize  
@@ -380,14 +394,15 @@ cdef class SphericalVoids:
             # ~2-8x average galaxy separation in linear spacing
             Radii = np.linspace(8, 2, 19, dtype=np.float32) * self.r_sep
             # self.Radii = np.array(Radii)[np.array(Radii) > self.cellsize]  # ensure radii larger than cellsize
-            self.Radii = Radii[(Radii > self.cellsize) & (Radii > self.rmin_spurious())]  # ensure radii larger than cellsize and detection limit of spurious voids
-            logger.debug(f'Radii set by default: cellsize={self.cellsize:.2f}, Rmin_spurious={self.rmin_spurious():.2f}.')
+            self.Radii = Radii[(Radii > self.cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
+            logger.debug(f'Radii set by default: cellsize={self.cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
             logger.debug(f'Radii set manually')
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
+        if Rmin < Rspurious: logger.warning(f"Spurious voids may enter sample (Rmin<{Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
         if type(void_overlap) is bool: 
@@ -552,7 +567,7 @@ cdef class SphericalVoids:
         self.void_position = position * np.asarray(self.cellsize, dtype=np.float32) + box_shift  # transform positions relative to data 
         self.void_radius   = np.asarray(void_rad[:total_voids_found]) * self.cellsize
         self.radii         = np.asarray(self.Radii)
-        self.void_number   = np.asarray(Nvoids)
+        self.void_count    = np.asarray(Nvoids)
 
         # post-process voids by counting enclosed galaxies
         if self.data_tree is None:
@@ -562,9 +577,10 @@ cdef class SphericalVoids:
 
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(bins-1):
-            norm = 1 / (np.prod(self.boxsize) * log(self.Radii[i] / self.Radii[i+1]))
+            norm = 1 / (self.volume * log(self.Radii[i] / self.Radii[i+1]))
             vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
-            vsf[1,i] = self.void_number[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
-            vsf[2,i] = sqrt(self.void_number[i+1]) * norm  # poisson uncertainty
+            vsf[1,i] = self.void_count[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
+            vsf[2,i] = sqrt(self.void_count[i+1]) * norm  # poisson uncertainty
 
         self.void_vsf      = np.asarray(vsf) 
+        print(np.prod(self.boxsize), self.volume)

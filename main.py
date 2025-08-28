@@ -96,7 +96,7 @@ def main():
         np.save(fn + "void_radii.npy", VF.void_radius)
         np.save(fn + "void_vsf.npy", VF.void_vsf)
     else:
-        print('Output: ', dict(zip(VF.radii, VF.void_number)))
+        print('Output: ', dict(zip(VF.radii, VF.void_count)))
 
 
 if __name__ == "__main__":

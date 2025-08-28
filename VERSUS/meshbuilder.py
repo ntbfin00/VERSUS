@@ -109,9 +109,11 @@ class DensityMesh:
             f.close()
         elif data_fn.endswith('.npy'):
             logger.info(f'Loading positions from npy file.')
-            positions = np.load(data_fn)[:,:3]
+            positions = np.load(data_fn)
             # read weights if 4th column provided
-            if len(data_cols)==4: weights = np.load(data_fn)[:,3]
+            if positions.shape[1]>3: 
+                weights = positions[:,3]
+                positions = positions[:,:3]
         else:
             raise Exception("File type not recognised. Please provide a file ending in .fits or .npy.")
 
@@ -133,7 +135,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTReconstruction', cellsize=1., boxpad=1.1, **kwargs):
+    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1.1, **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -152,7 +154,7 @@ class DensityMesh:
 
         # use galaxies (or randoms for survey) to estimate boxsize if not supplied
         if self.box_like:
-            boxsize = self.data_positions.max(axis=0) - self.data_positions.min(axis=0)
+            boxsize = np.ceil(np.abs(self.data_positions.max(axis=0) - self.data_positions.min(axis=0)))
             boxcenter = (self.data_positions.max(axis=0) + self.data_positions.min(axis=0)) / 2
             nmesh = boxsize // cellsize // 2 * 2  # ensure boxsize is divisible by even number of cells
             cellsize = positions = None
@@ -273,7 +275,7 @@ class DensityMesh:
                 # estimate survey volume
                 self.volume = survey_mask.sum() * mesh.cellsize.prod()
                 # estimate density using cells inside survey
-                self.rho_mean = (self.W_data/self.W_random) * mesh.mesh_randoms.value[survey_mask]
+                self.rho_mean = (self.W_data / self.W_random) * mesh.mesh_randoms.value[survey_mask]
                 self.rho_mean = self.rho_mean.mean() / mesh.cellsize.prod()  # must scale by cellsize
                 # estimate average galaxy separation
                 self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
@@ -327,12 +329,6 @@ class DensityMesh:
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
         logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
         self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 
-        self.data_tree = cKDTree(self.data_positions)
-        self.random_tree = None if self.random_positions is None else cKDTree(self.random_positions)
-        del self.data_positions
-        del self.data_weights
-        del self.random_positions
-        del self.random_weights
 
         self.delta = mesh.mesh_delta.value
         self.nmesh = mesh.nmesh
@@ -349,16 +345,19 @@ class DensityMesh:
                 save_mesh = os.path.join('mesh', f'mesh_{nbins}_{self.dtype}')
             # save
             delta_hdu = fits.PrimaryHDU(self.delta)
-            # data_tree_hdu = fits.ImageHDU(data=self.data_positions, name='data_positions')
-            # random_tree_hdu = fits.ImageHDU(data=self.random_positions, name='random_positions')
+            data_pos_hdu = fits.ImageHDU(data=self.data_positions, name='data_positions')
+            data_weight_hdu = fits.ImageHDU(data=self.data_weights, name='data_weights')
+            random_pos_hdu = fits.ImageHDU(data=self.random_positions, name='random_positions')
+            random_weight_hdu = fits.ImageHDU(data=self.random_weights, name='random_weights')
             rsep_hdu = fits.ImageHDU(data=[self.r_sep], name='r_sep')
             boxsize_hdu = fits.ImageHDU(data=self.boxsize, name='boxsize')
             boxcenter_hdu = fits.ImageHDU(data=self.boxcenter, name='boxcenter')
             boxlike_hdu = fits.ImageHDU(data=[int(self.box_like)], name='box_like')
+            volume_hdu = fits.ImageHDU(data=[self.volume], name='volume')
             logger.info(f'Saving density mesh to {save_mesh}.fits')
-            # hdul = fits.HDUList([delta_hdu, data_tree, random_tree,
-                                 # rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
-            hdul = fits.HDUList([delta_hdu, rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
+            hdul = fits.HDUList([delta_hdu, data_pos_hdu, data_weight_hdu, random_pos_hdu, random_weight_hdu,
+                                 rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu, volume_hdu])
+            # hdul = fits.HDUList([delta_hdu, rsep_hdu, boxsize_hdu, boxcenter_hdu, boxlike_hdu])
             hdul.writeto(f'{save_mesh}.fits', overwrite=True)
             hdul.close()
 
