@@ -10,9 +10,9 @@ logger.setLevel(logging.INFO)
 def parse_args():
     parser = argparse.ArgumentParser(description="Run spherical void-finding on simulated or survey data")
     parser.add_argument('--data', help="Array or path to data positions")
-    parser.add_argument('--random', help="Array or path to random positions")
+    parser.add_argument('--randoms', help="Array or path to random positions")
     parser.add_argument('--data_weights', help="Array of weights for data positions")
-    parser.add_argument('--random_weights', help="Array of weights for random positions")
+    parser.add_argument('--randoms_weights', help="Array of weights for random positions")
     parser.add_argument('--columns', nargs='+', help="Data column headers to read positions (XYZ/rdz)")
     parser.add_argument('--mesh', default=None, 
                         help="Array or path to density mesh. If not None and data also provided, save to path provided (True for default path).")
@@ -74,13 +74,12 @@ def main():
         save_mesh = args.mesh
 
     # initialise void finder with command-line arguments
-    VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
-                        delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
+    VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.randoms, random_weights=args.randoms_weights, data_cols=args.columns,
+                        delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh, init_sm_frac=args.smoothing, 
                         cellsize=args.cellsize, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
-    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, 
-                       init_sm_frac=args.smoothing, threads=args.threads)
+    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
 
     # save void output to file
     if args.save_fn is None:

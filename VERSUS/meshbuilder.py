@@ -3,11 +3,10 @@ import os
 from astropy.io import fits
 import logging
 from scipy.spatial import cKDTree
-
+from VERSUS.sphericalvoids import tophat_smoothing
 
 logger = logging.getLogger(__name__)
 
-# @cython.cclass
 class DensityMesh:
     r"""                                                                                                                                          
     Generate density mesh from galaxy and random positions. 
@@ -32,6 +31,9 @@ class DensityMesh:
     dtype: string
         Mesh data type.
 
+    init_sm_frac: float, default=0.45
+        Initial small scale smoothing fraction of density field.
+
     reconstruct: string
         Type of reconstruction to run - 'disp', 'rsd' or 'disp+rsd'. Defaults to no reconstruction. Must additionally provide 'f' and 'bias' in recon_args.
 
@@ -43,13 +45,15 @@ class DensityMesh:
     """
 
     def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, 
-                 data_cols=None, dtype='f4', reconstruct=None, recon_args=None, **kwargs):
+                 data_cols=None, dtype='f4', init_sm_frac=0.45, reconstruct=None, recon_args=None, **kwargs):
 
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
         logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
         self.dtype = dtype
         logger.debug(f'Data type: {self.dtype}')
+        # initial smoothing fraction to improve void center determination
+        self.init_sm_frac = init_sm_frac
         # set reconstruction parameters
         self.reconstruct = reconstruct
         self.recon_args = {} if recon_args is None else recon_args
@@ -176,7 +180,7 @@ class DensityMesh:
 
         return mesh
 
-    def _set_mesh_density(self, mesh, smoothing_radius=0., **kwargs):
+    def _set_mesh_density(self, mesh, initial_smoothing=True, **kwargs):
         r"""
         Populate mesh with galaxies and randoms
 
@@ -185,8 +189,8 @@ class DensityMesh:
         mesh: pyrecon.recon.BaseReconstruction object
             Input density mesh.
             
-        smoothing_radius : float, default=0.
-            Gaussian radius as factor of galaxy separation with which to smooth data and random fields before computing overdensity.
+        initial_smoothing: bool
+            Perform initial small-scale smoothing of density field.
         """
 
         # assign data
@@ -195,9 +199,16 @@ class DensityMesh:
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
         # calculate mesh overdensity
-        if smoothing_radius > 0.: logger.info(f"Applying {smoothing_radius:.1f} Mpc smoothing to data and random fields.")
-        mesh.set_density_contrast(smoothing_radius=smoothing_radius, **kwargs)
-
+        if initial_smoothing:
+            # initial small-scale field smoothing to improve void center determination
+            mesh.set_density_contrast(smoothing_radius=0., ran_min=-1, **kwargs)
+            logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(self.init_sm_frac * self.r_sep))
+            print('initial', mesh.mesh_delta.value[0,0,:10])  # WHY IS THIS CHANGING
+            mesh.mesh_delta.value = tophat_smoothing(mesh.mesh_delta.value, self.cellsize, 
+                                                     self.init_sm_frac * self.r_sep, threads=8)
+            print('post', mesh.mesh_delta.value[0,0,:10])
+        else:
+            mesh.set_density_contrast(**kwargs)
 
     def run_recon(self, f=None, bias=None, los=None, engine='IterativeFFTReconstruction', 
                   boxpad=1.1, smoothing_radius=10., field='rsd', **kwargs):
@@ -218,7 +229,7 @@ class DensityMesh:
         # set and smooth mesh
         self.data_mesh = self._set_mesh(f=f, bias=bias, engine=engine, cellsize=self.cellsize, los=los,
                                         boxpad=boxpad, fft_engine='fftw', fft_plan='estimate', **kwargs)
-        self._set_mesh_density(self.data_mesh, smoothing_radius=smoothing_radius)
+        self._set_mesh_density(self.data_mesh, initial_smoothing=False, smoothing_radius=smoothing_radius)
         # run reconstruction
         logger.debug(f"Reconstruction running on {self.data_mesh.nmesh} mesh.")
         self.data_mesh.run()
@@ -230,7 +241,7 @@ class DensityMesh:
         del self.data_mesh
 
         
-    def size_mesh(self, niterations=4, cellsize=4., smoothing_radius=0., **kwargs):
+    def size_mesh(self, niterations=4, cellsize=4., **kwargs):
         r"""
         Estimate the survey volume, mean density and average galaxy separation.
 
@@ -270,7 +281,9 @@ class DensityMesh:
                 self.cellsize = self.r_sep/2.
                 mesh = self._set_mesh(boxpad=1., cellsize=self.cellsize, bias=1.)
                 # determine survey boundary (cells outside have delta=0.)
-                self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs)
+                self._set_mesh_density(mesh, **kwargs)
+                print(self.cellsize, mesh.cellsize, mesh.nmesh)
+                print((mesh.mesh_delta.value==0.).sum())
                 survey_mask = mesh.mesh_delta.value != 0.
                 # estimate survey volume
                 self.volume = survey_mask.sum() * mesh.cellsize.prod()
@@ -286,7 +299,7 @@ class DensityMesh:
         logger.info(f'Cellsize set to {self.cellsize:.2f}')# ({cells_per_r_sep:.1f} cells per average separation)') 
 
         
-    def create_mesh(self, boxpad=1.1, cellsize=4., smoothing_radius=0., save_mesh=None, **kwargs):
+    def create_mesh(self, boxpad=1.1, cellsize=4., save_mesh=None, **kwargs):
         r"""
         Create the density mesh
 
@@ -297,9 +310,6 @@ class DensityMesh:
 
         cellsize: float, default=4.
             Size of mesh cells. 
-
-        smoothing_radius : float, default=0.62
-            Smoothing scale for random field.
 
         ran_min : float, default=0.01
             Minimum fraction of average randoms for cell to be counted as part of survey.
@@ -313,7 +323,7 @@ class DensityMesh:
         """
 
         # estimate cellsize based on galaxy density
-        if not hasattr(self, 'cellsize'): self.size_mesh(cellsize=cellsize)#, smoothing_radius=smoothing_radius, **kwargs)
+        if not hasattr(self, 'cellsize'): self.size_mesh(cellsize=cellsize)
         if (self.rho_mean * self.cellsize**3)>1: logger.warning("Cellsize exceeds one galaxy per cell. Mesh is no longer shot-noise dominated.")
 
         # run optional reconstruction
@@ -328,9 +338,10 @@ class DensityMesh:
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
         logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
-        self._set_mesh_density(mesh, smoothing_radius=smoothing_radius, **kwargs) 
+        self._set_mesh_density(mesh, **kwargs) 
 
         self.delta = mesh.mesh_delta.value
+        print(self.delta.shape, (self.delta == 0.).sum(), self.delta.min(), self.delta.max())
         self.nmesh = mesh.nmesh
         self.boxsize = mesh.boxsize
         self.boxcenter = mesh.boxcenter

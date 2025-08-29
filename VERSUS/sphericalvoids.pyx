@@ -5,7 +5,7 @@ import numpy as np
 cimport numpy as np
 cimport cython
 from cython.parallel import prange, parallel
-from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
+from libc.math cimport sqrt,sin,cos,fabs,log
 import logging
 cimport void_openmp_library as VOL
 from .meshbuilder import DensityMesh
@@ -13,6 +13,86 @@ from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
+# functions for top-hat smoothing
+def _FFT3Dr(delta, dims, threads=1):
+    logger.debug('Computing forwards FFT')
+
+    # align arrays
+    delta_in  = pyfftw.empty_aligned(dims, dtype='float32')
+    delta_out = pyfftw.empty_aligned((dims[0], dims[1], dims[2]//2+1), dtype='complex64')
+
+    # plan FFTW
+    fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
+                            flags=('FFTW_ESTIMATE',),
+                            direction='FFTW_FORWARD', threads=threads)
+
+    # put input array into delta_r and perform FFTW
+    delta_in [:] = delta;  fftw_plan(delta_in, delta_out);  return delta_out
+
+def _IFFT3Dr(delta_k, dims, threads=1):
+    logger.debug('Computing inverse FFT')
+
+    # align arrays
+    delta_in  = pyfftw.empty_aligned((dims[0], dims[1], dims[2]//2+1), dtype='complex64')
+    delta_out = pyfftw.empty_aligned(dims, dtype='float32')
+
+    # plan FFTW
+    fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
+                            flags=('FFTW_ESTIMATE',),
+                            direction='FFTW_BACKWARD', threads=threads)
+
+    # put input array into delta_r and perform FFTW
+    delta_in [:] = delta_k;  fftw_plan(delta_in, delta_out);  return delta_out
+
+@cython.boundscheck(False)
+@cython.cdivision(True)
+@cython.wraparound(False)
+cpdef tophat_smoothing(delta, float cellsize, float radius, int threads=1):
+    r"""
+    Smooth density field with top-hat filter
+
+    Parameters
+    ----------
+
+    radius: float
+        Smoothing radius of top-hat filter.
+    """
+
+    cdef float prefact,kR,fact
+    cdef int i, j, k, xdim, ydim, zdim
+    cdef np.float32_t[::1] kkx, kky, kkz
+    cdef np.complex64_t[:,:,::1] delta_k
+
+    xdim, ydim, zdim = delta.shape
+    # compute FFT of field
+    delta_k = _FFT3Dr(delta, delta.shape, threads=threads)
+
+    # loop over Fourier modes
+    logger.debug('Looping over fourier modes')
+    kkx = np.fft.fftfreq(xdim, cellsize).astype('f4')**2
+    kky = np.fft.fftfreq(ydim, cellsize).astype('f4')**2
+    kkz = np.fft.rfftfreq(zdim, cellsize).astype('f4')**2
+
+    prefact = 2.0 * np.pi * radius
+    for i in prange(xdim, nogil=True):
+        for j in range(ydim):
+            for k in range(zdim//2 + 1):
+
+                # skip when kx, ky and kz equal zero
+                if i==0 and j==0 and k==0:
+                    continue
+
+                # compute the value of |k|
+                kR = prefact * sqrt(kkx[i] + kky[j] + kkz[k])
+                if fabs(kR)<1e-5:  fact = 1.
+                else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
+                delta_k[i,j,k] =  fact * delta_k[i,j,k]
+
+    delta_sm = _IFFT3Dr(delta_k, delta.shape, threads=threads)
+
+    return delta_sm                                                                                                                                     
+
+# void-finding class
 cdef class SphericalVoids:
     r"""
     Run spherical void-finding algorithm.
@@ -66,7 +146,7 @@ cdef class SphericalVoids:
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
-                 dtype='f4', reconstruct=None, recon_args=None, 
+                 dtype='f4', init_sm_frac=0.45, reconstruct=None, recon_args=None, 
                  delta_mesh=None, mesh_args=None, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
@@ -76,7 +156,8 @@ cdef class SphericalVoids:
         if data_positions is not None:
             delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                      random_positions=random_positions, random_weights=random_weights, 
-                                     data_cols=data_cols, dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
+                                     data_cols=data_cols, dtype=dtype, init_sm_frac=init_sm_frac, 
+                                     reconstruct=reconstruct, recon_args=recon_args)
             delta_mesh.create_mesh(**kwargs)
             for name in properties:
                 if name.endswith('_positions'):
@@ -155,72 +236,39 @@ cdef class SphericalVoids:
         return (2.2 * self.void_delta + 3.6) / rho_mean**(1/3)
 
 
-    def FFT3Dr(self):
-        logger.debug('Computing forwards FFT')
+    # def FFT3Dr(self):
+        # logger.debug('Computing forwards FFT')
 
-        # align arrays
-        delta_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-        delta_out = pyfftw.empty_aligned((self.delta.shape[0], 
-                                          self.delta.shape[1], 
-                                          self.delta.shape[2]//2+1), dtype='complex64')
+        # # align arrays
+        # delta_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+        # delta_out = pyfftw.empty_aligned((self.delta.shape[0], 
+                                          # self.delta.shape[1], 
+                                          # self.delta.shape[2]//2+1), dtype='complex64')
 
-        # plan FFTW
-        fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
-                                flags=('FFTW_ESTIMATE',),
-                                direction='FFTW_FORWARD', threads=self.threads)
+        # # plan FFTW
+        # fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
+                                # flags=('FFTW_ESTIMATE',),
+                                # direction='FFTW_FORWARD', threads=self.threads)
                                     
-        # put input array into delta_r and perform FFTW
-        delta_in [:] = self.delta;  fftw_plan(delta_in, delta_out);  return delta_out
+        # # put input array into delta_r and perform FFTW
+        # delta_in [:] = self.delta;  fftw_plan(delta_in, delta_out);  return delta_out
 
-    def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k):
-        logger.debug('Computing inverse FFT')
+    # def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k):
+        # logger.debug('Computing inverse FFT')
 
-        # align arrays
-        delta_in  = pyfftw.empty_aligned((self.delta.shape[0], 
-                                          self.delta.shape[1], 
-                                          self.delta.shape[2]//2+1), dtype='complex64')
-        delta_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+        # # align arrays
+        # delta_in  = pyfftw.empty_aligned((self.delta.shape[0], 
+                                          # self.delta.shape[1], 
+                                          # self.delta.shape[2]//2+1), dtype='complex64')
+        # delta_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
 
-        # plan FFTW
-        fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
-                                flags=('FFTW_ESTIMATE',),
-                                direction='FFTW_BACKWARD', threads=self.threads)
+        # # plan FFTW
+        # fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
+                                # flags=('FFTW_ESTIMATE',),
+                                # direction='FFTW_BACKWARD', threads=self.threads)
                                     
-        # put input array into delta_r and perform FFTW
-        delta_in [:] = delta_k;  fftw_plan(delta_in, delta_out);  return delta_out
-
-    # @cython.boundscheck(False)
-    # @cython.cdivision(True)
-    # @cython.wraparound(False)
-    # cdef _reset_survey_mask(self, delta_sm):
-        # r"""
-        # In-place operation that resets cells outside survey region to mean density.
-
-        # Parameters
-        # ----------
-        # delta_sm: array
-            # Smoothed overdensity mesh.
-        # """
-        # # cdef int i, j, k
-        # # cdef np.float32_t[:,:,::1] d_true = self.delta  
-        # # cdef float[:,:,::1] d_true = self.delta
-
-        # print('delta_sm (in function)', type(delta_sm))
-        # print('self.delta', type(self.delta))
-        # # d_true = self.delta
-        # # print(type(d_true))
-        
-        # logger.debug('Resetting survey mask')
-        # delta_sm[self.delta == 0.0] = 0.0
-        # # for i in range(self.nmesh[0]):
-            # # for j in range(self.nmesh[1]):
-                # # for k in range(self.nmesh[2]):
-                    # # # if density field outside survey region then set to average density
-                    # # if d_true[i,j,k] == 0.:
-                        # # delta_sm[i,j,k] = 0.
-
-        # return delta_sm
-
+        # # put input array into delta_r and perform FFTW
+        # delta_in [:] = delta_k;  fftw_plan(delta_in, delta_out);  return delta_out
 
     @cython.boundscheck(False)
     @cython.cdivision(True)
@@ -236,37 +284,7 @@ cdef class SphericalVoids:
             Smoothing radius of top-hat filter.
         """
 
-        cdef float prefact,kR,fact
-        cdef int i, j, k, xdim, ydim, zdim
-        cdef np.float32_t[::1] kkx, kky, kkz
-        cdef np.complex64_t[:,:,::1] delta_k
-
-        xdim, ydim, zdim = self.nmesh
-        # compute FFT of field
-        delta_k = self.FFT3Dr()
-
-        # loop over Fourier modes
-        logger.debug('Looping over fourier modes')
-        kkx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')**2
-        kky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')**2
-        kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
-
-        prefact = 2.0 * np.pi * radius
-        for i in prange(xdim, nogil=True):
-            for j in range(ydim):
-                for k in range(zdim//2 + 1):
-
-                    # skip when kx, ky and kz equal zero
-                    if i==0 and j==0 and k==0:
-                        continue 
-
-                    # compute the value of |k|
-                    kR = prefact * sqrt(kkx[i] + kky[j] + kkz[k])
-                    if fabs(kR)<1e-5:  fact = 1.
-                    else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
-                    delta_k[i,j,k] =  fact * delta_k[i,j,k]
-
-        delta_sm = self.IFFT3Dr(delta_k)
+        delta_sm = tophat_smoothing(self.delta, self.cellsize, radius, self.threads)
 
         # reset survey mask
         if not self.box_like:
@@ -328,7 +346,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=False, init_sm_frac=0.45, int threads=8):
+    def run_voidfinding(self, list radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -459,10 +477,10 @@ cdef class SphericalVoids:
             num_voids_around2 = VOL.num_voids_around2
             mark_void_region  = VOL.mark_void_region
 
-        # initial small-scale field smoothing to improve void center determination
-        if init_sm_frac and self.data_tree is not None:
-            logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
-            self.delta = self._smoothing(init_sm_frac * self.r_sep)
+        # # initial small-scale field smoothing to improve void center determination
+        # if init_sm_frac and self.data_tree is not None:
+            # logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
+            # self.delta = self._smoothing(init_sm_frac * self.r_sep)
 
         # iterate through void radii
         total_voids_found = 0
