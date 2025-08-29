@@ -52,6 +52,7 @@ cdef class SphericalVoids:
     cdef public float[3] boxcenter
     cdef public bint box_like
     cdef public float volume
+    cdef object box_shift
     cdef list data_cols
     cdef float[:] Radii
     cdef float void_delta
@@ -116,10 +117,12 @@ cdef class SphericalVoids:
 
         self.nmesh = self.delta.shape
         self.cellsize = self.boxsize[0] / self.nmesh[0]
+        self.box_shift = np.asarray(self.boxcenter, dtype=np.float32) - np.asarray(self.boxsize, dtype=np.float32)/2 
         logger.debug(f"Mesh data type: {self.delta.dtype}")
 
         if self.data_tree is not None:
             logger.info('Making k-d trees')
+            self.data_tree -= self.box_shift
             self.data_tree = cKDTree(self.data_tree, compact_nodes=False, balanced_tree=False,
                                      boxsize=self.boxsize if self.box_like else None)
             self.random_tree = None if self.box_like else cKDTree(self.random_tree, compact_nodes=False, balanced_tree=False)
@@ -563,8 +566,7 @@ cdef class SphericalVoids:
 
         # finish by setting the class fields
         position = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
-        box_shift = np.asarray(self.boxcenter, dtype=np.float32) - np.asarray(self.boxsize, dtype=np.float32)/2 
-        self.void_position = position * np.asarray(self.cellsize, dtype=np.float32) + box_shift  # transform positions relative to data 
+        self.void_position = position * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.void_radius   = np.asarray(void_rad[:total_voids_found]) * self.cellsize
         self.radii         = np.asarray(self.Radii)
         self.void_count    = np.asarray(Nvoids)
@@ -574,6 +576,8 @@ cdef class SphericalVoids:
             logger.warning("self.data_tree (scipy.spatial.cKDTree object of positions) has not been provided to determine void sizes directly from galaxy positions. Output may be subject to discreteness effects.")
         else:
             self.check_real_space()
+
+        self.void_position += self.box_shift
 
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(bins-1):
