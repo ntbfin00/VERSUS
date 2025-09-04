@@ -2,6 +2,10 @@
 ### Void Extraction in Real-space of Spherical UnderdensitieS
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adaptation of the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) code.
 
+<p align="center">
+  <img src="flowchart.png?raw=true" alt="VERSUS algorithm"/>
+</p>
+
 ## Requirements
 
 - pyrecon
