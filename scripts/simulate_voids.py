@@ -19,7 +19,7 @@ np.random.seed(42)
 
 # inputs
 Rmin, Rmax = (30, 50)
-Ncand      = int(1e5) # number of candidate voids
+Ncand      = 2000 # number of candidate voids
 R_extent   = 2.5  # factor of void radius to imprint void density profile
 
 # derived quantities
@@ -88,43 +88,8 @@ print(f"Number of voids: {Nvoids} (initial = {Ncand})")
 # save to file
 save_dir = "sims/"
 append_fn = f"_rho{args.rho_mean}_{args.voidfinder}.npy"
-if not os.path.exists(save_dir): 
-    print("making")
-    os.makedirs(save_dir)
-else:
-    print("exists")
-
+if not os.path.exists(save_dir): os.makedirs(save_dir)
 np.save(f"{save_dir}/gal_pos{append_fn}", gal_pos)
 np.save(f"{save_dir}/void_pos{append_fn}", void_pos)
 np.save(f"{save_dir}/void_rad{append_fn}", radii)
 print(f"Outputs saved to file: simulated_fields/*{append_fn}")
-
-
-# import matplotlib.pyplot as plt
-
-# def compute_vsf(radii):
-    # bins = np.arange(Rmin, Rmax+2, 2)
-    # print(f"Histogram bins: {bins}")
-    # counts = np.histogram(radii, bins=bins)[0]
-
-    # vsf = np.zeros((3, counts.size))
-    # for i in range(counts.size):
-        # norm = 1 / (BoxSize**3 * np.log(bins[i+1] / bins[i]))
-        # vsf[0,i] = np.sqrt(bins[i] * bins[i+1])  geometric mean radius for logarithmic scale
-        # vsf[1,i] = counts[i] * norm  vsf
-        # vsf[2,i] = np.sqrt(counts[i]) * norm  poisson uncertainty
-    # vsf[0] = vsf[0][::-1]
-    # vsf[1] = vsf[1][::-1]
-    # vsf[2] = vsf[2][::-1]
-    # vsf_fn = f"vsf/input_vsf_Nv{counts.sum()}_R{Rmin}-{Rmax}"
-    # np.save(vsf_fn+".npy", vsf)
-
-
-# plot VSF
-# plt.errorbar(*vsf, color='k', marker='o', markersize=2, capsize=2)
-# plt.xscale('log')
-# plt.yscale('log')
-# plt.xlabel('R')
-# plt.ylabel('dN/dlnR')
-# plt.savefig(vsf_fn+".png")
-# plt.show()

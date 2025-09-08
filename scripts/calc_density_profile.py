@@ -30,7 +30,10 @@ args = parser.parse_args()
 
 box_shift = args.boxsize/2 - args.boxcenter
 
-if args.save.endswith('.npy'):
+if args.save is None:
+    save_files = False
+    save_plot = False
+elif args.save.endswith('.npy'):
     args.save = args.save[:-4]
     save_files = True
     save_plot = False
@@ -63,18 +66,23 @@ def compute_profile(gal_pos, void_pos, void_radii, save=None):
     tree = cKDTree(gal_pos + box_shift, compact_nodes=False, 
                    balanced_tree=False, boxsize=args.boxsize + 0.0001)
 
-    rr = np.arange(0, args.Rmax + 0.1, 0.1)[1:]
-    N = np.zeros((rr.size + 1, void_radii.size))
-    V = np.zeros((rr.size + 1, void_radii.size))
-    for (i,r) in enumerate(rr):
+    rr = np.arange(0, args.Rmax + 0.1, 0.1)
+    N = np.zeros((rr.size, void_radii.size))
+    V = np.zeros((rr.size, void_radii.size))
+    for (i,r) in enumerate(rr[1:]):
         N[i+1] = tree.query_ball_point(void_pos + box_shift, r * void_radii,  
                                        workers=-1, return_length=True)
         V[i+1] = 4 * np.pi * (r * void_radii)**3 / 3
 
     N = N[1:] - N[:-1]
     V = V[1:] - V[:-1]
+    r_mid = (rr[1:] + rr[:-1]) / 2  # take midpoint 
     rho = (N / V).mean(axis=1)
     rho_mean = gal_pos.shape[0] / args.boxsize**3 if args.rho_mean is None else args.rho_mean
+
+    # ensure intercept at (0,0)
+    r_mid = np.insert(r_mid, 0, 0.) 
+    rho = np.insert(rho, 0, 0.)
 
     if save is not None: np.save(save, np.array([rr, rho / rho_mean]))
 
@@ -83,7 +91,6 @@ def compute_profile(gal_pos, void_pos, void_radii, save=None):
 def plot_profile(rr, rho, rho_mean, save=None, ax=None, **kwargs):
     if ax is None: fig, ax = plt.subplots(1)
     ax.plot(rr, rho / rho_mean, **kwargs)
-    # ax.plot(rr, rho, **kwargs)
     ax.set_ylabel(r"$\rho(r) / \bar{\rho}$", fontsize=14)
     ax.set_xlabel("$r/R_\mathrm{void}$", fontsize=14)
     ax.grid()
