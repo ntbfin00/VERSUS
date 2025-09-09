@@ -12,7 +12,7 @@ parser.add_argument('-v', '--void_pos', type=str,
                     nargs='+', help="Path to void positions")
 parser.add_argument('-R', '--void_radii', type=str, 
                     nargs='+', help="Path to void radii")
-parser.add_argument('--profile', type=str, 
+parser.add_argument('--profiles', type=str, 
                     nargs='+', default=None, help="Alternatively path to pre-save density profile")
 parser.add_argument('--model', type=str, default=None, help="Type of analytic model to plot")
 parser.add_argument('--Rmax', type=float, default=4, help="Maximum R limit")
@@ -48,12 +48,27 @@ else:
     save_files = True
     save_plot = True
 
-def load(fn):
+def load(fn, radius=False):
     if fn.endswith('.npy'):
         pos = np.load(fn)
-    elif fn.endswith('.fits'):
+    elif fn.endswith('.fits') and not radius:
         with fits.open(fn) as f:
             pos = np.array([f[1].data['X'], f[1].data['Y'], f[1].data['Z']]).T
+    # read revolver output
+    elif fn.endswith('.txt'):
+        with open(fn) as f:
+            header = f.readlines()[1].split(' ')[1:]
+        pos_indx = 1
+        rad_indx = 4
+        if not header[pos_indx].startswith('XYZ'):
+            raise Exception(f"Incorrect column ({header[pos_indx]}) read for void positions")
+        if not header[rad_indx-2].startswith('R_eff'):
+            raise Exception(f"Incorrect column ({header[rad_indx-2]}) read for void radius")
+        f = np.loadtxt(fn)
+        if radius:
+            pos = f[:, rad_indx]
+        else:
+            pos = f[:, pos_indx:pos_indx+3]
     else:
         raise Exception(f"{fn} format not recognised.")
     return pos
@@ -61,7 +76,7 @@ def load(fn):
 def compute_profile(gal_pos, void_pos, void_radii, save=None):
     gal_pos = load(gal_pos)
     void_pos = load(void_pos)
-    void_radii = load(void_radii)
+    void_radii = load(void_radii, radius=True)
 
     tree = cKDTree(gal_pos + box_shift, compact_nodes=False, 
                    balanced_tree=False, boxsize=args.boxsize + 0.0001)
@@ -98,7 +113,8 @@ def plot_profile(rr, rho, rho_mean, save=None, ax=None, **kwargs):
     if save is not None: plt.savefig(save)
 
 fig, ax = plt.subplots(1)
-for i in range(len(args.void_pos)):
+i = -1
+for i in range(0 if args.void_pos is None else len(args.void_pos)):
     gal_pos = args.gal_pos[0] if len(args.gal_pos) == 1 else args.gal_pos[i]
 
     profile = compute_profile(gal_pos, args.void_pos[i], args.void_radii[i], 
@@ -110,8 +126,8 @@ for i in range(len(args.void_pos)):
                    'label': None if args.legend is None else args.legend[i]}
     plot_profile(*profile, ax=ax, **plot_kwargs)
 
-if args.profile is not None:
-    for (j,fn) in enumerate(args.profile):
+if args.profiles is not None:
+    for (j,fn) in enumerate(args.profiles):
         ax.plot(*np.load(fn), lw=2, 
                 color=None if args.color is None else args.color[i+j+1],
                 ls=None if args.ls is None else args.ls[i+j+1],
@@ -122,6 +138,11 @@ if args.model is not None:
             lw=2, color=None if args.color is None else args.color[-1], 
             ls=None if args.ls is None else args.ls[-1],
             label=None if args.legend is None else args.legend[-1])
+
+ax.set_ylabel(r"$\rho(r) / \bar{\rho}$", fontsize=14)
+ax.set_xlabel("$r/R_\mathrm{void}$", fontsize=14)
+ax.grid()
+plt.tight_layout()
 
 if args.legend is not None: plt.legend(loc='lower right')
 if save_plot: plt.savefig(f"{args.save}{append}")
