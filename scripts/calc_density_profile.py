@@ -90,6 +90,8 @@ def compute_profile(gal_pos, void_pos, void_radii, Rrange=None, Rmax=4, step=0.1
         void_radii = void_radii[cut]
         void_pos = void_pos[cut]
 
+    print(f"Computing profile from {void_radii.size} voids")
+
     tree = cKDTree(gal_pos + box_shift, compact_nodes=False, 
                    balanced_tree=False, boxsize=args.boxsize + 0.0001)
 

@@ -12,13 +12,15 @@ class SizeBias:
     """
 
     def __init__(self, gal_pos, void_pos, void_radii, void_delta, rho_mean):
-        self.gal_pos = gal_pos
-        self.void_pos = void_pos
-        self.void_radii = void_radii
         self.void_delta = void_delta
         self.rho_mean = rho_mean
 
-    def fit_profile(self, Rmax, nbins=100):
+        self.gal_pos = gal_pos
+        indx = np.argsort(void_radii)
+        self.void_pos = void_pos[indx]
+        self.void_radii = void_radii[indx]
+
+    def fit_profile(self, Rmax, nbins=100, rbins=5):
         r"""
         Fit the rescaled (r / R) void density profile (in units of rho / rho_mean)
         """
@@ -41,9 +43,11 @@ class SizeBias:
         N = N[1:] - N[:-1]
         V = V[1:] - V[:-1]
         self.r = (self.r[1:] + self.r[:-1]) / 2  # take midpoint
-        self.profile = (N / V).mean(axis=1) / self.rho_mean
+        self.rsplit = np.array([radii[0] for radii in np.array_split(self.void_radii, rbins)])
+        self.profile = np.array([rho.mean(axis=1) for rho in np.array_split(N / V, rbins, axis=1)]) / self.rho_mean
+        # self.profile = (N / V).mean(axis=1) / self.rho_mean
 
-        self.fit = PchipInterpolator(np.insert(self.r, 0, 0.), np.insert(self.profile, 0, 0.))
+        self.fit = PchipInterpolator(np.insert(self.r, 0, 0.), np.insert(self.profile, 0, 0., axis=1), axis=1)
         # self.err = np.sqrt(((N / V)**2).sum(axis=1)) / self.void_radii.size / self.rho_mean
         # self.err = np.where(self.err == 0., 1e-6, self.err)
         # self.fit = splrep(np.insert(self.r, 0, 0.), np.insert(self.profile, 0, 0.), w = 1 / np.insert(self.err, 0, 1e-6))
@@ -53,10 +57,10 @@ class SizeBias:
         if ax is None: 
             fig, ax = plt.subplots(1)
             show = True
-        ax.plot(self.r, self.profile, **kwargs)
+        ax.plot(self.r, self.profile.T, **kwargs)
         # ax.errorbar(self.r, self.profile, self.err, **kwargs)
         rr = np.linspace(self.r.min(), self.r.max(), 100)
-        ax.plot(rr, self.fit(rr), c='k', ls='--')
+        ax.plot(rr, self.fit(rr).T, c='k', ls='--')
         # ax.plot(rr, splev(rr, self.fit), c='k', ls='--') #change
         ax.set_ylabel(r"$\rho(r) / \bar{\rho}$", fontsize=14)
         ax.set_xlabel("$r/R_\mathrm{void}$", fontsize=14)
@@ -73,7 +77,8 @@ class SizeBias:
         # fit void density profile
         rr = np.linspace(0, r, Npts)
         if not hasattr(self, 'fit'): self.fit_profile(Rmax)
-        rho = self.fit(rr / R)
+        rbin = min(np.searchsorted(self.rsplit, 100), self.rsplit.size - 1)
+        rho = self.fit(rr / R)[rbin]
         # rho = splev(rr / R, self.fit)  # change
 
         # calculate average enclosed density
