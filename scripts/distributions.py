@@ -7,10 +7,13 @@ def Abacus_VSF(r):
     # R = [30, 34, 38, 42, 46, 50, 54], Total voids: 6035
     return 5e5 * np.exp(-r / 6) - 80
 
-def density_profile(r, vf='VERSUS'):
-    if vf == 'VERSUS':
-        # return 0.85 * np.exp(((0.3 * np.sqrt(x)) ** (1.5 * x)) - ((0.93 * x) ** (-11 * x))) + 0.11
-        return 0.9 * np.exp(200 * (3*r - 4) * np.exp(-5 * r)) + 0.1
+def density_profile(r, vf):
+    if vf == 'versus':
+        return 0.9 * np.exp(200 * (10*r - 13) * np.exp(-6 * r)) + 0.1
+    elif vf == 'zobov':
+        return np.exp(16 * (r - 1) * np.exp(-3.5 * r))
+    elif vf == 'voxel':
+        return np.exp(-120 / (np.exp(6 * r) + 20))
     else:
         raise Exception("Analytic model for chosen void-finder has not been implemented")
 
@@ -19,8 +22,8 @@ def sample_density(R, Rmax, rho_mean, vf='VERSUS', npts=5000):
     PDF = lambda r, R: r**2 * density_profile(r / R, vf=vf)
 
     # compute CDF and mean counts within Rmax 
-    r_grid = np.linspace(1e-6, Rmax, npts)
-    CDF = cumtrapz(PDF(r_grid, R), r_grid, initial=0.0)
+    rr = np.linspace(1e-6, Rmax, npts)
+    CDF = cumtrapz(PDF(rr, R), rr, initial=0.0)
     mean_counts = 4 * np.pi * rho_mean * CDF[-1]
     CDF /= CDF[-1]
 
@@ -29,7 +32,7 @@ def sample_density(R, Rmax, rho_mean, vf='VERSUS', npts=5000):
 
     # inverse transform sample radii
     u = np.random.rand(N)
-    CDF_inv = PchipInterpolator(CDF, r_grid)
+    CDF_inv = PchipInterpolator(CDF, rr)
     r_samples = CDF_inv(u)
 
     # randomly distribute positions within Rmax
@@ -41,34 +44,4 @@ def sample_density(R, Rmax, rho_mean, vf='VERSUS', npts=5000):
     y = r_samples * sint * np.sin(phi)
     z = r_samples * mu
 
-    return np.vstack([x, y, z]).T#, r_samples
-
-    
-
-# --- Define density profile ---
-# import matplotlib.pyplot as plt
-# rho_mean = 0.1
-# R = 35
-# Rmax = 3 * R
-# # particles, r_samples, Nexp, N = sample_poisson_particles(R, rho_mean, Rmax)
-# particles, r_samples = sample_density(R, Rmax, rho_mean) 
-
-# # --- Diagnostics: histogram vs analytic PDF ---
-# r_test = np.linspace(0.01, Rmax, 400)
-# pdf = r_test**2 * density_profile(r_test / R)
-# norm = np.trapz(pdf, r_test)  # normalize
-# pdf /= norm
-
-# fig, (ax1, ax2) = plt.subplots(1,2, figsize=(8,4))
-# ax1.hist(r_samples, bins=50, density=True, histtype='step', label='sampled radii')
-# ax1.plot(r_test, pdf, 'r-', lw=2, label='analytic $p(r)$')
-# ax1.set_xlabel("r")
-# ax1.set_ylabel("Probability density")
-# ax1.legend()
-
-# counts, bins = np.histogram(r_samples, bins=50)
-# ax2.hlines(rho_mean, 0, Rmax, ls='--', color='k', alpha=0.5)
-# ax2.plot(r_test, rho_mean * density_profile(r_test / R), 'r-', lw=2, label=r'analytic $\rho(r)$')
-# ax2.stairs(counts  / (4/3 * np.pi * (bins[1:]**3 - bins[:-1]**3)), bins)
-# plt.tight_layout()
-# plt.show()
+    return np.vstack([x, y, z]).T

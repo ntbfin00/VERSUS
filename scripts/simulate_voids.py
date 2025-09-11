@@ -19,7 +19,7 @@ np.random.seed(42)
 
 # inputs
 Rmin, Rmax = (30, 50)
-Ncand      = 2000 # number of candidate voids
+Ncand      = 2010 # number of candidate voids
 R_extent   = 2.5  # factor of void radius to imprint void density profile
 
 # derived quantities
@@ -29,9 +29,9 @@ print(f'n={args.rho_mean:.4f} | N_gals={Ngal} | Ncand={Ncand} | Rmin={Rmin} | Rm
 
 
 # define the arrays with the positions and radii of the voids
-gal_pos  = np.random.rand(Ngal, 3).astype(np.float32) * boxsize 
 void_pos = np.random.rand(Ncand, 3).astype(np.float32) * boxsize 
-tree = KDTree(gal_pos, boxsize=boxsize, compact_nodes=False, balanced_tree=False)
+gal_pos  = np.random.rand(Ngal, 3).astype(np.float32) * boxsize 
+tree = KDTree(gal_pos, boxsize=boxsize + 1e-3, compact_nodes=False, balanced_tree=False)
 
 # sample Abacus-like void size distribution
 population = np.linspace(Rmin, Rmax, 1000)
@@ -89,7 +89,7 @@ print(f"Number of voids: {Nvoids} (initial = {Ncand})")
 save_dir = "sims/"
 append_fn = f"_rho{args.rho_mean}_{args.voidfinder}.npy"
 if not os.path.exists(save_dir): os.makedirs(save_dir)
-np.save(f"{save_dir}/gal_pos{append_fn}", gal_pos)
-np.save(f"{save_dir}/void_pos{append_fn}", void_pos)
-np.save(f"{save_dir}/void_rad{append_fn}", radii)
-print(f"Outputs saved to file: simulated_fields/*{append_fn}")
+np.save(f"{save_dir}gal_pos{append_fn}", gal_pos)
+np.save(f"{save_dir}void_pos{append_fn}", void_pos)
+np.save(f"{save_dir}void_rad{append_fn}", radii)
+print(f"Outputs saved to file: {save_dir}*{append_fn}")
