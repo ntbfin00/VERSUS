@@ -20,7 +20,7 @@ class SizeBias:
         self.void_pos = void_pos[indx]
         self.void_radii = void_radii[indx]
 
-    def fit_profile(self, Rmax, nbins=100, rbins=5):
+    def fit_profile(self, Rmax=4, nbins=100, rbins=5):
         r"""
         Fit the rescaled (r / R) void density profile (in units of rho / rho_mean)
         """
@@ -36,9 +36,10 @@ class SizeBias:
         N = np.zeros((self.r.size, self.void_radii.size))
         V = np.zeros((self.r.size, self.void_radii.size))
         for (i,r) in enumerate(self.r[1:]):
-            N[i+1] = tree.query_ball_point(self.void_pos + boxshift, r * self.void_radii,  
+            R = r * self.void_radii
+            N[i+1] = tree.query_ball_point(self.void_pos + boxshift, R,  
                                            workers=-1, return_length=True)
-            V[i+1] = 4 * np.pi * (r * self.void_radii)**3 / 3 
+            V[i+1] = 4 * np.pi * R**3 / 3 
 
         N = N[1:] - N[:-1]
         V = V[1:] - V[:-1]
@@ -69,16 +70,16 @@ class SizeBias:
         if save is not None: plt.savefig(save)
         if show: plt.show()
 
-    def _F(self, r, R, Rmax=4, Npts=1000):
+    def _F(self, r, R, rbias=1., Rmax=4, Npts=1000):
         r"""
         Argument for conditional error function.
         """
 
         # fit void density profile
         rr = np.linspace(0, r, Npts)
-        if not hasattr(self, 'fit'): self.fit_profile(Rmax)
-        rbin = min(np.searchsorted(self.rsplit, 100), self.rsplit.size - 1)
-        rho = self.fit(rr / R)[rbin]
+        if not hasattr(self, 'fit'): self.fit_profile(Rmax=Rmax)
+        rbin = min(np.searchsorted(self.rsplit, R), self.rsplit.size - 1)
+        rho = self.fit(rr / R / rbias)[rbin]
         # rho = splev(rr / R, self.fit)  # change
 
         # calculate average enclosed density
@@ -87,34 +88,34 @@ class SizeBias:
         return A * (1 + self.void_delta - rho_enc)
 
     # REMOVE!
-    def test(self, robs, R):
+    # def test(self, robs, R):
 
-        rr = np.linspace(0, robs, 1000)
-        rho = 0.9 * np.exp(200 * (3*(rr/R) - 4) * np.exp(-5 * (rr/R))) + 0.1
-        rho_enc = trapz(rr**2 * rho, rr, axis=0) * 3 / robs**3
-        A = np.sqrt(2 * np.pi * self.rho_mean * robs**3 / 3 / rho_enc)
-        F = A * (1 + self.void_delta - rho_enc)
+        # from scripts.distributions import density_profile
+        # rr = np.linspace(0, robs, 1000)
+        # rho_enc = trapz(rr**2 * density_profile(rr / R, vf='versus'), rr, axis=0) * 3 / robs**3
+        # A = np.sqrt(2 * np.pi * self.rho_mean * robs**3 / 3 / rho_enc)
+        # F = A * (1 + self.void_delta - rho_enc)
 
-        P_survive = erfc(F) / 2
-        P_survive = np.append(P_survive, 1)
-        return (1 - P_survive[:-1]) * P_survive[1:][::-1].cumprod()[::-1]
+        # P_survive = erfc(F) / 2
+        # P_survive = np.append(P_survive, 1)
+        # return (1 - P_survive[:-1]) * P_survive[1:][::-1].cumprod()[::-1]
 
-    def _P_detect(self, robs, R):
+    def _P_detect(self, robs, R, rbias=1.):
         r"""
         
         Probability of detecting a void with true radius R_true at radius r_obs (i.e. P(r_obs | R_true)).
         """
 
-        P_survive = erfc(self._F(robs, R)) / 2
+        P_survive = erfc(self._F(robs, R, rbias=rbias)) / 2
         P_survive = np.append(P_survive, 1)
         return (1 - P_survive[:-1]) * P_survive[1:][::-1].cumprod()[::-1]
 
-    def N_detect(self, robs, radii):
+    def N_detect(self, robs, radii, rbias=1.):
         r"""
         Number (and uncertainty) of voids detected in bins robs given true radii.
         """
         
-        P_detect = np.array([self._P_detect(robs, R) for R in radii])
+        P_detect = np.array([self._P_detect(robs, R, rbias=rbias) for R in radii])
 
         return P_detect.sum(axis=0), np.sqrt((P_detect**2).sum(axis=0))
 
