@@ -587,4 +587,3 @@ cdef class SphericalVoids:
             vsf[2,i] = sqrt(self.void_count[i+1]) * norm  # poisson uncertainty
 
         self.void_vsf      = np.asarray(vsf) 
-        print(np.prod(self.boxsize), self.volume)

@@ -18,7 +18,8 @@ parser.add_argument('--profiles', type=str, nargs='+',
 parser.add_argument('--models', type=str, nargs='+', 
                     default=None, help="Type of analytic model to plot")
 parser.add_argument('--Rrange', type=float, nargs=2, default=None, help="R range to cut void data")
-parser.add_argument('--Rmax', type=float, default=4, help="Maximum R limit to plot")
+parser.add_argument('--Nvoids', type=int, default=None, help="Number of voids to use to compute density profile")
+parser.add_argument('--Rmax', type=float, default=3, help="Maximum R limit to plot")
 parser.add_argument('--step', type=float, default=0.05, help="Stepsize")
 parser.add_argument('--rho_mean', type=float, default=None, help="Manually enter mean density rather than measure from galaxies")
 parser.add_argument('--save', type=str, default=None, help="Path to save")
@@ -60,15 +61,16 @@ def load(fn, radius=False):
     elif fn.endswith('.fits') and not radius:
         with fits.open(fn) as f:
             pos = np.array([f[1].data['X'], f[1].data['Y'], f[1].data['Z']]).T
-    # read revolver output
-    elif fn.endswith('.txt'):
-        with open(fn) as f:
-            header = f.readlines()[1].split(' ')[1:]
-        pos_indx = 1
+    # read revolver or VIDE output
+    elif fn.endswith('.txt') or fn.endswith('.out'):
+        pos_indx = ['.out','.txt'].index(fn[-4:])
         rad_indx = 4
-        if not header[pos_indx].startswith('XYZ'):
+        delimiter = [', ', ' '][pos_indx]
+        with open(fn) as f:
+            header = f.readlines()[pos_indx].split(delimiter)[pos_indx:]
+        if 'XYZ' not in header[pos_indx] and 'x,y,z' not in header[pos_indx]:
             raise Exception(f"Incorrect column ({header[pos_indx]}) read for void positions")
-        if not header[rad_indx-2].startswith('R_eff'):
+        if 'R_eff' not in header[rad_indx-2] and 'radius' not in header[rad_indx-2]:
             raise Exception(f"Incorrect column ({header[rad_indx-2]}) read for void radius")
         f = np.loadtxt(fn)
         if radius:
@@ -80,7 +82,7 @@ def load(fn, radius=False):
 
     return pos
 
-def compute_profile(gal_pos, void_pos, void_radii, Rrange=None, Rmax=4, step=0.1, save=None):
+def compute_profile(gal_pos, void_pos, void_radii, Rrange=None, Nvoids=None, Rmax=4, step=0.1, save=None):
     gal_pos = load(gal_pos)
     void_pos = load(void_pos)
     void_radii = load(void_radii, radius=True)
@@ -89,6 +91,9 @@ def compute_profile(gal_pos, void_pos, void_radii, Rrange=None, Rmax=4, step=0.1
         cut = (void_radii >= Rrange[0]) & (void_radii <= Rrange[1])
         void_radii = void_radii[cut]
         void_pos = void_pos[cut]
+    if Nvoids is not None:
+        void_radii = void_radii[:Nvoids]
+        void_pos = void_pos[:Nvoids]
 
     print(f"Computing profile from {void_radii.size} voids")
 
@@ -126,16 +131,16 @@ def plot_profile(rr, rho, rho_mean, save=None, ax=None, **kwargs):
     plt.tight_layout()
     if save is not None: plt.savefig(save)
 
-fig, ax = plt.subplots(1)
+fig, ax = plt.subplots(1, figsize=(5.5,4))
 i = j = -1
 if args.void_pos is not None:
     for i in range(len(args.void_pos)):
-        append = f"_{i}" if len(args.void_pos) > 1 else ""
+        indx = f"_{i}" if len(args.void_pos) > 1 else ""
         gal_pos = args.gal_pos[i] if len(args.gal_pos) > 1 else args.gal_pos[0]
 
         profile = compute_profile(gal_pos, args.void_pos[i], args.void_radii[i], 
-                                  Rrange=args.Rrange, Rmax=args.Rmax, step=args.step,
-                                  save=f"{args.save}{append}.npy" if save_files else None)
+                                  Rrange=args.Rrange, Nvoids=args.Nvoids, Rmax=args.Rmax, step=args.step,
+                                  save=f"{args.save}{indx}.npy" if save_files else None)
 
         plot_kwargs = {'lw': 2, 
                        'color': colors[i+1] if args.color is None else args.color[i], 
@@ -160,11 +165,11 @@ if args.models is not None:
 ax.set_ylabel(r"$\rho(r) / \bar{\rho}$", fontsize=14)
 ax.set_xlabel("$r/R_\mathrm{void}$", fontsize=14)
 ax.set_xlim(0, args.Rmax)
-ax.set_ylim(0, 1.1)
+ax.set_ylim(0, 1.4)
 ax.grid()
 plt.tight_layout()
 
-if args.legend is not None: plt.legend(loc='lower right')
+if args.legend is not None: plt.legend(loc='lower right', fontsize=12)
 if save_plot: plt.savefig(f"{args.save}{append}")
 plt.show()
 

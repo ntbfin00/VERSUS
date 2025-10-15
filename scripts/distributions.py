@@ -12,8 +12,14 @@ def density_profile(r, vf):
         return 0.9 * np.exp(200 * (10*r - 13) * np.exp(-6 * r)) + 0.1
     elif vf == 'zobov':
         return np.exp(16 * (r - 1) * np.exp(-3.5 * r))
+    elif vf == 'zobov_baryc':
+        return 0.9 * 0.004 ** (np.cos(3.2 * r - 1.1) * (np.exp(-2.8 * r) )) + 0.1
+    elif vf == 'vide':
+        return np.exp(4 / 5 * (6 * r - 5) * np.exp(- r * np.exp(r) / 2))
     elif vf == 'voxel':
         return np.exp(-120 / (np.exp(6 * r) + 20))
+    elif vf == 'n12':
+        return np.where(r < 1, r**12, 1)
     else:
         raise Exception("Analytic model for chosen void-finder has not been implemented")
 
