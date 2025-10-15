@@ -10,7 +10,7 @@ Spherical underdensity void-finding with optional real-space reconstruction for 
 ## Installation
 To pip install:
 ```
-pip install [-e] https://github.com/ntbfin00/VERSUS.git
+pip install [-e] git+https://github.com/ntbfin00/VERSUS.git
 ```
 The ```-e``` flag is optional and will install an editable version of the package.
 
