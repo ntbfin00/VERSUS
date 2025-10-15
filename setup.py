@@ -31,9 +31,11 @@ setup(
         include_path=["VERSUS/"]),
     include_dirs=[numpy.get_include()],
     install_requires=[
-        "numpy",
-        "pyrecon"
+        "numpy<2.0",
+        "pyrecon @ git+https://github.com/cosmodesi/pyrecon.git",
+        "pyfftw",
+        "astropy"
     ],
     author="Nathan Findlay",
-    description="Implementation of Pylians3 spherical void finder adapted for survey geometries.",
+    description="Modification of Pylians3 spherical void finder adapted for survey geometries.",
 )

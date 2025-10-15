@@ -2,10 +2,9 @@ import numpy as np
 import argparse
 from pathlib import Path
 import logging
-from VERSUS.sphericalvoids import SphericalVoids
+from VERSUS import setup_logging, SphericalVoids
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+setup_logging(level=logging.INFO)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run spherical void-finding on simulated or survey data")
