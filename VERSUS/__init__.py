@@ -10,4 +10,5 @@ def setup_logging(level=logging.INFO):
 
 from .sphericalvoids import SphericalVoids
 from .meshbuilder import DensityMesh
-__all__ = ["SphericalVoids", "DensityMesh"]
+from .modelling import SizeBias
+__all__ = ["setup_logging", "SphericalVoids", "DensityMesh", "SizeBias"]

@@ -5,6 +5,7 @@ import logging
 from VERSUS import setup_logging, SphericalVoids
 
 setup_logging(level=logging.INFO)
+logger = logging.getLogger("VERSUS")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run spherical void-finding on simulated or survey data")
@@ -61,6 +62,17 @@ def parse_args():
 
     return args
 
+
+def filename(save_fn):
+    append = 'void_{}.npy'
+    path = Path(save_fn + append)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if len(path.stem[:-7])>0:
+        return save_fn + '_' + append
+    else:
+        return save_fn + append
+
+
 def main():
     args = parse_args()
 
@@ -82,20 +94,15 @@ def main():
                        init_sm_frac=args.smoothing, threads=args.threads)
 
     # save void output to file
-    if args.save_fn is None:
-        path = "output/"
-        fn = path
-    else:
-        path = '/'.join(args.save_fn.split('/')[:-1])
-        fn = args.save_fn
+    fn = "output/" if args.save_fn is None else args.save_fn
     logger.info(f"Saving output to {fn}*")
     if not args.dryrun:
-        Path(path).mkdir(parents=True, exist_ok=True)  # create directory if not exists
-        np.save(fn + "void_positions.npy", VF.void_position)
-        np.save(fn + "void_radii.npy", VF.void_radius)
-        np.save(fn + "void_vsf.npy", VF.void_vsf)
+        fn = filename(fn)
+        np.save(fn.format("positions"), VF.void_position)
+        np.save(fn.format("radii"), VF.void_radius)
+        np.save(fn.format("vsf"), VF.void_vsf)
     else:
-        print('Output: ', dict(zip(VF.radii, VF.void_count)))
+        logger.info(f'Output: {dict(zip(VF.radii, VF.void_count))}')
 
 
 if __name__ == "__main__":
