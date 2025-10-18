@@ -1,6 +1,6 @@
 # VERSUS
 ### Void Extraction in Real-space of Spherical UnderdensitieS
-Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adaptation of the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) code.
+Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
 <p align="center">
   <img src="flowchart.png?raw=true" alt="VERSUS algorithm"/>
@@ -8,9 +8,11 @@ Spherical underdensity void-finding with optional real-space reconstruction for 
 
 
 ## Installation
+To pip install:
 ```
-pip install [-e] https://github.com/ntbfin00/VERSUS.git
+pip install [-e] git+https://github.com/ntbfin00/VERSUS.git
 ```
+The ```-e``` flag is optional and will install an editable version of the package.
 
 ## Usage
 Command line:
@@ -34,5 +36,6 @@ vf = SphericalVoids(delta_mesh=<path/to/mesh>, ...)
 # Output:
 vf.void_position  # void positions
 vf.void_radius    # void radii
+vf.void_count     # number of voids of a given radius
 vf.vsf            # void size function (r, vsf, error)
 ```
