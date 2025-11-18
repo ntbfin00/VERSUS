@@ -1,9 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import erfc
-from scipy.integrate import trapz 
+from scipy.integrate import trapezoid as trapz
 from scipy.spatial import cKDTree
-from scipy.interpolate import PchipInterpolator, splrep, splev #change
+from scipy.interpolate import PchipInterpolator #, splrep, splev #change
 
 class SizeBias:
     r"""

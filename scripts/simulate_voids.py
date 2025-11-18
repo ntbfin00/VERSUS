@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser(description='Compute void density profile')
 parser.add_argument('-n', '--rho_mean', required=True, type=float, help="Number density of tracers")
 parser.add_argument('-vf', '--voidfinder', required=True, type=str, help="Void-finder density profile to imprint")
 parser.add_argument('--boxsize', type=float, default=2000)
+parser.add_argument('--R_extent', type=float, default=2.5, help="factor of void radius to imprint void density profile")
 args = parser.parse_args()
 
 # initialise the random seeds
@@ -20,7 +21,7 @@ np.random.seed(42)
 # inputs
 Rmin, Rmax = (30, 50)
 Ncand      = 2010 # number of candidate voids
-R_extent   = 2.5  # factor of void radius to imprint void density profile
+R_extent   = args.R_extent
 
 # derived quantities
 boxsize = args.boxsize
