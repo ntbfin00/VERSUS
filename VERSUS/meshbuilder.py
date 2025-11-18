@@ -43,7 +43,8 @@ class DensityMesh:
     """
 
     def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, 
-                 data_cols=None, dtype='f4', reconstruct=None, recon_args=None, **kwargs):
+                 data_cols=None, dtype='f4', reconstruct=None, recon_args=None, 
+                 boxsize=None, boxcenter=None, **kwargs):
 
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
@@ -63,6 +64,11 @@ class DensityMesh:
         else:
             self.data_positions = data_positions
             self.data_weights = data_weights
+        # automatically determine boxsize from positions
+        self.boxsize = np.ceil(np.abs(self.data_positions.max(axis=0) 
+                       - self.data_positions.min(axis=0))) if boxsize is None else boxsize
+        self.boxcenter = (self.data_positions.max(axis=0) 
+                         + self.data_positions.min(axis=0)) / 2 if boxcenter is None else boxcenter
         self.N_data = len(self.data_positions)  # total galaxies 
         self.W_data = self.N_data if data_weights is None else np.array(data_weights).sum()  # sum of galaxy weights
         # load randoms from file
@@ -154,8 +160,8 @@ class DensityMesh:
 
         # use galaxies (or randoms for survey) to estimate boxsize if not supplied
         if self.box_like:
-            boxsize = np.ceil(np.abs(self.data_positions.max(axis=0) - self.data_positions.min(axis=0)))
-            boxcenter = (self.data_positions.max(axis=0) + self.data_positions.min(axis=0)) / 2
+            boxsize = self.boxsize
+            boxcenter = self.boxcenter 
             nmesh = boxsize // cellsize // 2 * 2  # ensure boxsize is divisible by even number of cells
             cellsize = positions = None
             wrap = True

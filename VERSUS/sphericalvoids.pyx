@@ -67,8 +67,8 @@ cdef class SphericalVoids:
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
-                 dtype='f4', reconstruct=None, recon_args=None, 
-                 delta_mesh=None, mesh_args=None, **kwargs):
+                 reconstruct=None, recon_args=None, delta_mesh=None, mesh_args=None, 
+                 dtype='f4', boxsize=None, boxcenter=None, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
                       'data_positions', 'random_positions', 'data_weights', 'random_weights']
@@ -77,7 +77,8 @@ cdef class SphericalVoids:
         if data_positions is not None:
             delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                      random_positions=random_positions, random_weights=random_weights, 
-                                     data_cols=data_cols, dtype=dtype, reconstruct=reconstruct, recon_args=recon_args)
+                                     data_cols=data_cols, reconstruct=reconstruct, recon_args=recon_args,
+                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter)
             delta_mesh.create_mesh(**kwargs)
             for name in properties:
                 if name.endswith('_positions'):
