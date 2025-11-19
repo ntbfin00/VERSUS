@@ -123,9 +123,8 @@ cdef class SphericalVoids:
 
         if self.data_tree is not None:
             logger.info('Making k-d trees')
-            self.data_tree -= self.box_shift
-            self.data_tree = cKDTree(self.data_tree, compact_nodes=False, balanced_tree=False,
-                                     boxsize=self.boxsize if self.box_like else None)
+            self.data_tree = cKDTree((self.data_tree - self.box_shift) % self.boxsize, compact_nodes=False, 
+                                     balanced_tree=False, boxsize=self.boxsize if self.box_like else None)
             self.random_tree = None if self.box_like else cKDTree(self.random_tree, compact_nodes=False, balanced_tree=False)
 
     def load_mesh(self, mesh_fn):

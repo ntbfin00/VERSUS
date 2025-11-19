@@ -125,7 +125,7 @@ class DensityMesh:
 
         # if x or y contained in data_cols assume positions are provided in cartesian coordinates
         # else convert sky positions to cartesian
-        if not np.array([a in data_cols for a in ('X','Y','x','y')]).any():
+        if not np.array([a in ''.join(data_cols).upper() for a in ('X','Y')]).all():
             logger.info('Converting sky positions to cartesian.')
             from pyrecon.utils import sky_to_cartesian
             # use LambdaCDM as default redshift to distance conversion
