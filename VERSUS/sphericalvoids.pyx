@@ -301,7 +301,7 @@ cdef class SphericalVoids:
 
         new_position = np.zeros_like(self.void_position)
         new_radius = np.zeros_like(self.void_radius)
-        self.Radii = self.Radii[:-1]
+        self.Radii = self.Radii[:self.Radii.size-1]
         Nvoids = np.zeros(self.Radii.size, dtype=np.int32)
         N_tot = 0
         for p in range(self.void_position.shape[0]):
