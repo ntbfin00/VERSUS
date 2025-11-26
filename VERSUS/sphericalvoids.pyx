@@ -285,9 +285,9 @@ cdef class SphericalVoids:
     @cython.cdivision(True)
     @cython.wraparound(False)
     def check_real_space(self):
-        cdef int p,q
+        cdef int p, q, N_tot
         cdef float fact, delta_enc
-        cdef int[::1] Nvoids
+        cdef int[::1] Nvoids 
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
@@ -299,9 +299,11 @@ cdef class SphericalVoids:
             rand_w = np.ones(self.rand_tree.n) if self.rand_weights is None else self.rand_weights
             fact = rand_w.sum() / data_w.sum()
 
-        # import time
-        # a = time.time()
+        new_position = np.zeros_like(self.void_position)
+        new_radius = np.zeros_like(self.void_radius)
+        self.Radii = self.Radii[:-1]
         Nvoids = np.zeros(self.Radii.size, dtype=np.int32)
+        N_tot = 0
         for p in range(self.void_position.shape[0]):
             pos = self.void_position[p]
             for q in range(self.Radii.size):
@@ -316,10 +318,14 @@ cdef class SphericalVoids:
                 delta_enc -= 1
 
                 if delta_enc < self.void_delta:
-                    self.void_radius[p] = R
+                    new_position[N_tot] = pos
+                    new_radius[N_tot] = R
                     Nvoids[q] += 1
+                    N_tot += 1
                     break
 
+        self.void_position = new_position[:N_tot]
+        self.void_radius = new_radius[:N_tot]
         self.void_count = np.asarray(Nvoids)
         logger.info("Voids resized.")
 
@@ -387,22 +393,17 @@ cdef class SphericalVoids:
         # set default radii if not provided
         Rspurious = self.rmin_spurious()
         if radii[0] == 0.:
-            # ~2-10x cellsize in logarithmic spacing
-            # self.Radii = 10**np.arange(1, 0.3, -0.005, dtype=np.float32) * self.cellsize  
-            # self.Radii = np.logspace(1, 0.3, 28, dtype=np.float32) * self.cellsize  
-            # self.Radii = np.linspace(15, 7, 25, dtype=np.float32) * self.cellsize
-            # ~2-10x cellsize in reverse logarithmic spacing
-            # self.Radii = (10 + 10**0.3 - np.logspace(0.3, 1, 28, dtype=np.float32)) * self.cellsize 
-
-            # ~2-8x average galaxy separation in linear spacing
-            Radii = np.linspace(8, 2, 19, dtype=np.float32) * self.r_sep
-            # self.Radii = np.array(Radii)[np.array(Radii) > self.cellsize]  # ensure radii larger than cellsize
+            Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
             self.Radii = Radii[(Radii > self.cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
             logger.debug(f'Radii set by default: cellsize={self.cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
+            # ensure extra bin for void resizing
+            if self.data_tree is not None:
+                Radii = np.append(Radii, Radii.min() - 2).astype(np.float32)
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
             logger.debug(f'Radii set manually')
+
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
         if Rmin < Rspurious: logger.warning(f"Spurious voids may enter sample (Rmin<{Rspurious:.0f} Mpc/h)")
@@ -580,7 +581,7 @@ cdef class SphericalVoids:
         self.void_position += self.box_shift
 
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
-        for i in range(bins-1):
+        for i in range(self.Radii.size - 1):
             norm = 1 / (self.volume * log(self.Radii[i] / self.Radii[i+1]))
             vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
             vsf[1,i] = self.void_count[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
