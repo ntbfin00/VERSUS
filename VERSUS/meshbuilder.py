@@ -141,7 +141,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=1., boxpad=1.1, **kwargs):
+    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=4., boxpad=1.1, **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -150,7 +150,7 @@ class DensityMesh:
         engine: string
             Reconstruction algorithm passed to pyrecon.
 
-        cellsize: float, default=1.
+        cellsize: float, default=4.
             Size of mesh cell.
 
         boxpad: float, default=1.1
@@ -260,7 +260,7 @@ class DensityMesh:
 
         logger.info(f'Estimating volume and average galaxy separation (Ngal = {self.N_data})')
         # create mesh flush with survey volume
-        mesh = self._set_mesh(boxpad=1.)
+        mesh = self._set_mesh(boxpad=1., cellsize=cellsize)
         # first estimate of volume (true if box)
         self.volume = np.prod(mesh.boxsize)
         # first estimate of mean density
