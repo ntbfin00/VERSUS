@@ -147,7 +147,7 @@ cdef class SphericalVoids:
                 else:
                     setattr(self, name, f[name].data)
 
-    def rmin_spurious(self):
+    def rmin_spurious(self, sign):
         r"""
         Determine the detection limit for spurious voids for the given tracer sample using an empirical formula. At smaller radii, spurious voids may contaminate the output void sample.
 
@@ -155,8 +155,13 @@ cdef class SphericalVoids:
         ----------
         """
 
+        if sign == 1:
+            fact = 2.2
+        else:
+            fact = 1.6
+
         rho_mean = 3 / (4 * np.pi * self.r_sep**3)
-        return (2.2 * self.void_delta + 3.6) / rho_mean**(1/3)
+        return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
 
 
     def FFT3Dr(self, use_wisdom=False):
@@ -332,20 +337,23 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def check_real_space(self):
+    def check_real_space(self, float sign):
         cdef int p, q, N_tot
         cdef float fact, delta_enc
         cdef int[::1] Nvoids 
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
+        # ensure correct expression for clusters
+        void_delta = sign * self.void_delta
+
         # compute factor for density calculation
         data_w = np.ones(self.data_tree.n) if self.data_weights is None else self.data_weights
         if self.box_like: 
-            fact = 3 * self.volume / (4 * np.pi * data_w.sum())
+            inv_rho_mean = 3 * self.volume / (4 * np.pi * data_w.sum())
         else:
             rand_w = np.ones(self.rand_tree.n) if self.rand_weights is None else self.rand_weights
-            fact = rand_w.sum() / data_w.sum()
+            inv_rho_mean = rand_w.sum() / data_w.sum()
 
         new_position = np.zeros_like(self.void_position)
         new_radius = np.zeros_like(self.void_radius)
@@ -362,10 +370,10 @@ cdef class SphericalVoids:
                     delta_enc /= R**3
                 else:
                     delta_enc /= rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
-                delta_enc *= fact
+                delta_enc *= inv_rho_mean 
                 delta_enc -= 1
 
-                if delta_enc < self.void_delta:
+                if sign * delta_enc < void_delta:
                     new_position[N_tot] = pos
                     new_radius[N_tot] = R
                     Nvoids[q] += 1
@@ -375,7 +383,6 @@ cdef class SphericalVoids:
         self.void_position = new_position[:N_tot]
         self.void_radius = new_radius[:N_tot]
         self.void_count = np.asarray(Nvoids)
-        logger.info("Voids resized.")
 
 
     def _sort_radii(self, float[:] radii):
@@ -435,16 +442,17 @@ cdef class SphericalVoids:
 
         # find peaks
         if void_delta>0: 
-            fact = -1.
+            sign = -1.
             void_delta *= -1
-            vf_type, sign = ('peak', '>')
+            vf_type, ineq = ('peak', '>')
+            Rspurious = 0.
         # find voids
         else:
-            fact = 1.
-            vf_type, sign = ('void', '<')
+            sign = 1.
+            vf_type, ineq = ('void', '<')
 
+        Rspurious = self.rmin_spurious(sign)
         # set default radii if not provided
-        Rspurious = self.rmin_spurious()
         if radii[0] == 0.:
             Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
             self.Radii = Radii[(Radii > self.cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
@@ -459,7 +467,7 @@ cdef class SphericalVoids:
 
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
-        if Rmin < Rspurious: logger.warning(f"Spurious voids may enter sample (Rmin<{Rspurious:.0f} Mpc/h)")
+        if Rmin < Rspurious: logger.warning(f"Spurious {vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
         if type(void_overlap) is bool: 
@@ -473,7 +481,7 @@ cdef class SphericalVoids:
         yzdim = ydim * zdim
         # set threads
         self.threads = os.cpu_count() if threads==0 else threads
-        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads (delta {sign} {self.void_delta:.2f})')
+        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
         if Rmin<self.cellsize:
@@ -527,14 +535,14 @@ cdef class SphericalVoids:
             R = self.Radii[q]
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
 
-            delta_sm = fact * self._smoothing(R, use_wisdom=use_wisdom)
+            delta_sm = sign * self._smoothing(R, use_wisdom=use_wisdom)
 
             # check void cells are present at this radius
             if np.min(delta_sm)>void_delta:
-                logger.info(f'No cells with delta {sign} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
+                logger.info(f'No cells with delta {ineq} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
                 continue
 
-            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and assigning IDs')
+            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and asineqing IDs')
             local_voids = 0
             for i in range(xdim):
                 for j in range(ydim):
@@ -544,7 +552,7 @@ cdef class SphericalVoids:
                             IDs[local_voids]     = yzdim*i + zdim*j + k
                             delta_v[local_voids] = delta_sm[i,j,k]
                             local_voids += 1
-            logger.debug(f'Found {local_voids} cells with delta {sign} {self.void_delta:.2f}')
+            logger.debug(f'Found {local_voids} cells with delta {ineq} {self.void_delta:.2f}')
 
             # sort delta_v by density
             indexes = np.argsort(delta_v[:local_voids])
@@ -607,7 +615,7 @@ cdef class SphericalVoids:
                     mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
                                      yzdim, R_grid2, i, j, k, threads=1)
 
-            logger.info(f'Found {voids_found} voids with radius R={R:.1f} Mpc/h')
+            logger.info(f'Found {voids_found} {vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
             void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
@@ -628,7 +636,7 @@ cdef class SphericalVoids:
         if self.data_tree is None:
             logger.warning("self.data_tree (scipy.spatial.cKDTree object of positions) has not been provided to determine void sizes directly from galaxy positions. Output may be subject to discreteness effects.")
         else:
-            self.check_real_space()
+            self.check_real_space(sign)
 
         self.void_position += self.box_shift
 
