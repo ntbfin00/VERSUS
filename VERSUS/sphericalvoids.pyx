@@ -1,4 +1,5 @@
 import os
+import pickle
 from astropy.io import fits
 import pyfftw
 import numpy as np
@@ -63,7 +64,7 @@ cdef class SphericalVoids:
     cdef public object void_radius
     cdef public object void_count
     cdef public object void_vsf
-    cdef dict __dict__
+    cdef object fft_plan, ifft_plan, fft_in, fft_out, ifft_in, ifft_out
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
@@ -146,7 +147,7 @@ cdef class SphericalVoids:
                 else:
                     setattr(self, name, f[name].data)
 
-    def rmin_spurious(self):
+    def rmin_spurious(self, sign):
         r"""
         Determine the detection limit for spurious voids for the given tracer sample using an empirical formula. At smaller radii, spurious voids may contaminate the output void sample.
 
@@ -154,43 +155,94 @@ cdef class SphericalVoids:
         ----------
         """
 
+        if sign == 1:
+            fact = 2.2
+        else:
+            fact = 1.6
+
         rho_mean = 3 / (4 * np.pi * self.r_sep**3)
-        return (2.2 * self.void_delta + 3.6) / rho_mean**(1/3)
+        return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
 
 
-    def FFT3Dr(self):
-        logger.debug('Computing forwards FFT')
+    def FFT3Dr(self, use_wisdom=False):
 
-        # align arrays
-        delta_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-        delta_out = pyfftw.empty_aligned((self.delta.shape[0], 
-                                          self.delta.shape[1], 
-                                          self.delta.shape[2]//2+1), dtype='complex64')
+        if self.fft_plan is None:
 
-        # plan FFTW
-        fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
-                                flags=('FFTW_ESTIMATE',),
-                                direction='FFTW_FORWARD', threads=self.threads)
-                                    
-        # put input array into delta_r and perform FFTW
-        delta_in [:] = self.delta;  fftw_plan(delta_in, delta_out);  return delta_out
+            self.fft_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+            self.fft_out = pyfftw.empty_aligned((self.delta.shape[0],
+                                                 self.delta.shape[1],
+                                                 self.delta.shape[2]//2 + 1), 
+                                                 dtype='complex64')
 
-    def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k):
-        logger.debug('Computing inverse FFT')
+            # load wisdom
+            axes = ['nx','ny','nz']
+            nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
+            wisdom_fn = os.path.join('wisdom', f'fft_wisdom_{nbins}.txt')
+            if use_wisdom and os.path.exists(wisdom_fn):
+                logger.info(f'Importing FFT wisdom from {wisdom_fn}')
+                with open(wisdom_fn, 'rb') as f:
+                    pyfftw.import_wisdom(pickle.load(f))
 
-        # align arrays
-        delta_in  = pyfftw.empty_aligned((self.delta.shape[0], 
-                                          self.delta.shape[1], 
-                                          self.delta.shape[2]//2+1), dtype='complex64')
-        delta_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+            # create plan
+            logger.debug('Creating FFT plan')
+            self.fft_plan = pyfftw.FFTW(self.fft_in, self.fft_out, 
+                                        axes=(0,1,2), direction='FFTW_FORWARD', threads=self.threads,
+                                        flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
 
-        # plan FFTW
-        fftw_plan = pyfftw.FFTW(delta_in, delta_out, axes=(0,1,2),
-                                flags=('FFTW_ESTIMATE',),
-                                direction='FFTW_BACKWARD', threads=self.threads)
-                                    
-        # put input array into delta_r and perform FFTW
-        delta_in [:] = delta_k;  fftw_plan(delta_in, delta_out);  return delta_out
+            # save wisdom
+            if use_wisdom and not os.path.exists(wisdom_fn):
+                logger.info(f'Saving FFT wisdom to {wisdom_fn}')
+                if not os.path.isdir('wisdom'): os.mkdir('wisdom')
+                with open(wisdom_fn, 'wb') as f:
+                    pickle.dump(pyfftw.export_wisdom(), f)
+
+        # execute FFT
+        logger.debug('Computing forwards FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
+        self.fft_in[:] = self.delta
+        self.fft_plan()
+
+        return self.fft_out
+
+
+    def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k, use_wisdom=False):
+
+        if self.ifft_plan is None:
+
+            self.ifft_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+            self.ifft_in  = pyfftw.empty_aligned((self.delta.shape[0],
+                                                  self.delta.shape[1],
+                                                  self.delta.shape[2]//2 + 1), 
+                                                  dtype='complex64')
+
+            # load wisdom
+            axes = ['nx','ny','nz']
+            nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
+            wisdom_fn = os.path.join('wisdom', f'ifft_wisdom_{nbins}.txt')
+            if use_wisdom and os.path.exists(wisdom_fn):
+                logger.debug('Importing IFFT wisdom')
+                with open(wisdom_fn, 'rb') as f:
+                    pyfftw.import_wisdom(pickle.load(f))
+
+            # create plan
+            logger.debug('Creating IFFT plan')
+            self.ifft_plan = pyfftw.FFTW(self.ifft_in, self.ifft_out,
+                                         axes=(0,1,2), direction='FFTW_BACKWARD', threads=self.threads,
+                                         flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
+
+            # save wisdom
+            if use_wisdom and not os.path.exists(wisdom_fn):
+                logger.debug(f'Saving IFFT wisdom to {wisdom_fn}')
+                if not os.path.isdir('wisdom'): os.mkdir('wisdom')
+                with open(wisdom_fn, 'wb') as f:
+                    pickle.dump(pyfftw.export_wisdom(), f)
+
+        # execute inverse FFT
+        logger.debug('Computing inverse FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
+        self.ifft_in[:] = delta_k
+        self.ifft_plan()
+
+        return self.ifft_out.copy()
+
 
     # @cython.boundscheck(False)
     # @cython.cdivision(True)
@@ -228,7 +280,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def _smoothing(self, float radius):
+    def _smoothing(self, float radius, use_wisdom=False):
         r"""
         Smooth density field with top-hat filter
 
@@ -245,8 +297,9 @@ cdef class SphericalVoids:
         cdef np.complex64_t[:,:,::1] delta_k
 
         xdim, ydim, zdim = self.nmesh
+
         # compute FFT of field
-        delta_k = self.FFT3Dr()
+        delta_k = self.FFT3Dr(use_wisdom=use_wisdom)
 
         # loop over Fourier modes
         logger.debug('Looping over fourier modes')
@@ -269,7 +322,7 @@ cdef class SphericalVoids:
                     else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
                     delta_k[i,j,k] =  fact * delta_k[i,j,k]
 
-        delta_sm = self.IFFT3Dr(delta_k)
+        delta_sm = self.IFFT3Dr(delta_k, use_wisdom=use_wisdom)
 
         # reset survey mask
         if not self.box_like:
@@ -284,20 +337,23 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def check_real_space(self):
+    def check_real_space(self, float sign):
         cdef int p, q, N_tot
         cdef float fact, delta_enc
         cdef int[::1] Nvoids 
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
+        # ensure correct expression for clusters
+        void_delta = sign * self.void_delta
+
         # compute factor for density calculation
         data_w = np.ones(self.data_tree.n) if self.data_weights is None else self.data_weights
         if self.box_like: 
-            fact = 3 * self.volume / (4 * np.pi * data_w.sum())
+            inv_rho_mean = 3 * self.volume / (4 * np.pi * data_w.sum())
         else:
             rand_w = np.ones(self.rand_tree.n) if self.rand_weights is None else self.rand_weights
-            fact = rand_w.sum() / data_w.sum()
+            inv_rho_mean = rand_w.sum() / data_w.sum()
 
         new_position = np.zeros_like(self.void_position)
         new_radius = np.zeros_like(self.void_radius)
@@ -314,10 +370,10 @@ cdef class SphericalVoids:
                     delta_enc /= R**3
                 else:
                     delta_enc /= rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
-                delta_enc *= fact
+                delta_enc *= inv_rho_mean 
                 delta_enc -= 1
 
-                if delta_enc < self.void_delta:
+                if sign * delta_enc < void_delta:
                     new_position[N_tot] = pos
                     new_radius[N_tot] = R
                     Nvoids[q] += 1
@@ -327,7 +383,6 @@ cdef class SphericalVoids:
         self.void_position = new_position[:N_tot]
         self.void_radius = new_radius[:N_tot]
         self.void_count = np.asarray(Nvoids)
-        logger.info("Voids resized.")
 
 
     def _sort_radii(self, float[:] radii):
@@ -337,7 +392,8 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, init_sm_frac=0.45, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, 
+                        float init_sm_frac=0.45, int threads=8, use_wisdom=False):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -350,14 +406,18 @@ cdef class SphericalVoids:
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
 
-        void_overlap: float, default=0.
-            Maximum allowed volume fraction of void overlap.
+        void_overlap: float, default=False
+            Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
+
+        init_sm_frac: float, default=0.45
+            Inititial spherical smoothing for galaxies and randoms on mesh.
 
         threads: int, default=8
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
+
+        use_wisdom: bool, default=False
+            Whether to save and load wisdom during FFT computations. Advantageous for serial void-finding runs.
         """
-
-
         cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
         cdef float R, R_grid, R_grid2, Rmin, Rspurious
         cdef int bins, Ncells, nearby_voids, threads2 
@@ -382,16 +442,17 @@ cdef class SphericalVoids:
 
         # find peaks
         if void_delta>0: 
-            fact = -1.
+            sign = -1.
             void_delta *= -1
-            vf_type, sign = ('peak', '>')
+            vf_type, ineq = ('peak', '>')
+            Rspurious = 0.
         # find voids
         else:
-            fact = 1.
-            vf_type, sign = ('void', '<')
+            sign = 1.
+            vf_type, ineq = ('void', '<')
 
+        Rspurious = self.rmin_spurious(sign)
         # set default radii if not provided
-        Rspurious = self.rmin_spurious()
         if radii[0] == 0.:
             Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
             self.Radii = Radii[(Radii > self.cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
@@ -406,7 +467,7 @@ cdef class SphericalVoids:
 
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
-        if Rmin < Rspurious: logger.warning(f"Spurious voids may enter sample (Rmin<{Rspurious:.0f} Mpc/h)")
+        if Rmin < Rspurious: logger.warning(f"Spurious {vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
         if type(void_overlap) is bool: 
@@ -420,7 +481,7 @@ cdef class SphericalVoids:
         yzdim = ydim * zdim
         # set threads
         self.threads = os.cpu_count() if threads==0 else threads
-        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads (delta{sign}{self.void_delta:.2f})')
+        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
         if Rmin<self.cellsize:
@@ -449,7 +510,6 @@ cdef class SphericalVoids:
         # define the arrays needed to compute the VSF
         Nvoids = np.zeros(bins,   dtype=np.int32)
         vsf    = np.zeros((3, bins-1), dtype=np.float32)
-        # Rmean  = np.zeros(bins-1, dtype=np.float32)
 
         # set function wrapping based on box-like
         if self.box_like:
@@ -466,7 +526,7 @@ cdef class SphericalVoids:
         # initial small-scale field smoothing to improve void center determination
         if init_sm_frac and self.data_tree is not None:
             logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
-            self.delta = self._smoothing(init_sm_frac * self.r_sep)
+            self.delta = self._smoothing(init_sm_frac * self.r_sep, use_wisdom=use_wisdom)
 
         # iterate through void radii
         total_voids_found = 0
@@ -475,14 +535,14 @@ cdef class SphericalVoids:
             R = self.Radii[q]
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
 
-            delta_sm = fact * self._smoothing(R)  # single precision smoothing
+            delta_sm = sign * self._smoothing(R, use_wisdom=use_wisdom)
 
             # check void cells are present at this radius
             if np.min(delta_sm)>void_delta:
-                logger.info(f'No cells with delta {sign} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
+                logger.info(f'No cells with delta {ineq} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
                 continue
 
-            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and assigning IDs')
+            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and asineqing IDs')
             local_voids = 0
             for i in range(xdim):
                 for j in range(ydim):
@@ -492,7 +552,7 @@ cdef class SphericalVoids:
                             IDs[local_voids]     = yzdim*i + zdim*j + k
                             delta_v[local_voids] = delta_sm[i,j,k]
                             local_voids += 1
-            logger.debug(f'Found {local_voids} cells with delta {sign} {self.void_delta:.2f}')
+            logger.debug(f'Found {local_voids} cells with delta {ineq} {self.void_delta:.2f}')
 
             # sort delta_v by density
             indexes = np.argsort(delta_v[:local_voids])
@@ -513,7 +573,7 @@ cdef class SphericalVoids:
 
             # select method to identify nearby voids based on radius
             mode = 0 if total_voids_found < (2*Ncells+1)**3 else 1
-            threads2 = 1 if Ncells<12 else min(4, self.threads) #empirically this seems to be the best
+            threads2 = 1 if Ncells<12 else min(4, self.threads)  # empirically this seems to be the best
             logger.debug(f'Setting threads2 = {threads2} (threads={self.threads})')
             if not void_overlap: logger.debug(f'Identifying nearby voids using mode {mode}')
 
@@ -555,7 +615,7 @@ cdef class SphericalVoids:
                     mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
                                      yzdim, R_grid2, i, j, k, threads=1)
 
-            logger.info(f'Found {voids_found} voids with radius R={R:.1f} Mpc/h')
+            logger.info(f'Found {voids_found} {vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
             void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
@@ -576,7 +636,7 @@ cdef class SphericalVoids:
         if self.data_tree is None:
             logger.warning("self.data_tree (scipy.spatial.cKDTree object of positions) has not been provided to determine void sizes directly from galaxy positions. Output may be subject to discreteness effects.")
         else:
-            self.check_real_space()
+            self.check_real_space(sign)
 
         self.void_position += self.box_shift
 

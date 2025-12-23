@@ -39,3 +39,7 @@ vf.void_radius    # void radii
 vf.void_count     # number of voids of a given radius
 vf.vsf            # void size function (r, vsf, error)
 ```
+
+If making repeated measurements on a fixed mesh, enable the FFT wisdom to be saved using the ```use_wisdom=True``` flag in ```VF.run_voidfinding```. The wisdom text files will be stored in the ```wisdom``` directory.
+
+If positive values for ``void_delta`` (default ``void_delta=-0.8```) in ```VF.run_voidfinding``` are entered, the algorithm will instead search for density peaks with enclosed density ```delta > void_delta```.
