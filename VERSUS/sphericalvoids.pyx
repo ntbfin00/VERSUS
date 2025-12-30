@@ -1,15 +1,16 @@
 import os
-import pickle
+# import pickle
 from astropy.io import fits
-import pyfftw
+# import pyfftw
 import numpy as np
 cimport numpy as np
 cimport cython
-from cython.parallel import prange, parallel
-from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
+# from cython.parallel import prange, parallel
+# from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
 import logging
-cimport void_openmp_library as VOL
+cimport void_library as VOL
 from .meshbuilder import DensityMesh
+from .smoothing import tophat_smoothing
 from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ cdef class SphericalVoids:
     cdef float void_delta
     cdef float void_overlap
     cdef int threads
+    cdef bint use_wisdom 
     cdef public object radii
     cdef public object void_position
     cdef public object void_radius
@@ -164,172 +166,168 @@ cdef class SphericalVoids:
         return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
 
 
-    def FFT3Dr(self, use_wisdom=False):
+    # def FFT3Dr(self, use_wisdom=False):
 
-        if self.fft_plan is None:
+        # if self.fft_plan is None:
 
-            self.fft_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-            self.fft_out = pyfftw.empty_aligned((self.delta.shape[0],
-                                                 self.delta.shape[1],
-                                                 self.delta.shape[2]//2 + 1), 
-                                                 dtype='complex64')
+            # self.fft_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+            # self.fft_out = pyfftw.empty_aligned((self.delta.shape[0],
+                                                 # self.delta.shape[1],
+                                                 # self.delta.shape[2]//2 + 1), 
+                                                 # dtype='complex64')
 
-            # load wisdom
-            axes = ['nx','ny','nz']
-            nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
-            wisdom_fn = os.path.join('wisdom', f'fft_wisdom_{nbins}.txt')
-            if use_wisdom and os.path.exists(wisdom_fn):
-                logger.info(f'Importing FFT wisdom from {wisdom_fn}')
-                with open(wisdom_fn, 'rb') as f:
-                    pyfftw.import_wisdom(pickle.load(f))
+            # # load wisdom
+            # axes = ['nx','ny','nz']
+            # nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
+            # wisdom_fn = os.path.join('wisdom', f'fft_wisdom_{nbins}.txt')
+            # if use_wisdom and os.path.exists(wisdom_fn):
+                # logger.info(f'Importing FFT wisdom from {wisdom_fn}')
+                # with open(wisdom_fn, 'rb') as f:
+                    # pyfftw.import_wisdom(pickle.load(f))
 
-            # create plan
-            logger.debug('Creating FFT plan')
-            self.fft_plan = pyfftw.FFTW(self.fft_in, self.fft_out, 
-                                        axes=(0,1,2), direction='FFTW_FORWARD', threads=self.threads,
-                                        flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
+            # # create plan
+            # logger.debug('Creating FFT plan')
+            # self.fft_plan = pyfftw.FFTW(self.fft_in, self.fft_out, 
+                                        # axes=(0,1,2), direction='FFTW_FORWARD', threads=self.threads,
+                                        # flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
 
-            # save wisdom
-            if use_wisdom and not os.path.exists(wisdom_fn):
-                logger.info(f'Saving FFT wisdom to {wisdom_fn}')
-                if not os.path.isdir('wisdom'): os.mkdir('wisdom')
-                with open(wisdom_fn, 'wb') as f:
-                    pickle.dump(pyfftw.export_wisdom(), f)
+            # # save wisdom
+            # if use_wisdom and not os.path.exists(wisdom_fn):
+                # logger.info(f'Saving FFT wisdom to {wisdom_fn}')
+                # if not os.path.isdir('wisdom'): os.mkdir('wisdom')
+                # with open(wisdom_fn, 'wb') as f:
+                    # pickle.dump(pyfftw.export_wisdom(), f)
 
-        # execute FFT
-        logger.debug('Computing forwards FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
-        self.fft_in[:] = self.delta
-        self.fft_plan()
+        # # execute FFT
+        # logger.debug('Computing forwards FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
+        # self.fft_in[:] = self.delta
+        # self.fft_plan()
 
-        return self.fft_out
+        # return self.fft_out
 
 
-    def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k, use_wisdom=False):
+    # def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k, use_wisdom=False):
 
-        if self.ifft_plan is None:
+        # if self.ifft_plan is None:
 
-            self.ifft_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-            self.ifft_in  = pyfftw.empty_aligned((self.delta.shape[0],
-                                                  self.delta.shape[1],
-                                                  self.delta.shape[2]//2 + 1), 
-                                                  dtype='complex64')
+            # self.ifft_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
+            # self.ifft_in  = pyfftw.empty_aligned((self.delta.shape[0],
+                                                  # self.delta.shape[1],
+                                                  # self.delta.shape[2]//2 + 1), 
+                                                  # dtype='complex64')
 
-            # load wisdom
-            axes = ['nx','ny','nz']
-            nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
-            wisdom_fn = os.path.join('wisdom', f'ifft_wisdom_{nbins}.txt')
-            if use_wisdom and os.path.exists(wisdom_fn):
-                logger.debug('Importing IFFT wisdom')
-                with open(wisdom_fn, 'rb') as f:
-                    pyfftw.import_wisdom(pickle.load(f))
+            # # load wisdom
+            # axes = ['nx','ny','nz']
+            # nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
+            # wisdom_fn = os.path.join('wisdom', f'ifft_wisdom_{nbins}.txt')
+            # if use_wisdom and os.path.exists(wisdom_fn):
+                # logger.debug('Importing IFFT wisdom')
+                # with open(wisdom_fn, 'rb') as f:
+                    # pyfftw.import_wisdom(pickle.load(f))
 
-            # create plan
-            logger.debug('Creating IFFT plan')
-            self.ifft_plan = pyfftw.FFTW(self.ifft_in, self.ifft_out,
-                                         axes=(0,1,2), direction='FFTW_BACKWARD', threads=self.threads,
-                                         flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
+            # # create plan
+            # logger.debug('Creating IFFT plan')
+            # self.ifft_plan = pyfftw.FFTW(self.ifft_in, self.ifft_out,
+                                         # axes=(0,1,2), direction='FFTW_BACKWARD', threads=self.threads,
+                                         # flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
 
-            # save wisdom
-            if use_wisdom and not os.path.exists(wisdom_fn):
-                logger.debug(f'Saving IFFT wisdom to {wisdom_fn}')
-                if not os.path.isdir('wisdom'): os.mkdir('wisdom')
-                with open(wisdom_fn, 'wb') as f:
-                    pickle.dump(pyfftw.export_wisdom(), f)
+            # # save wisdom
+            # if use_wisdom and not os.path.exists(wisdom_fn):
+                # logger.debug(f'Saving IFFT wisdom to {wisdom_fn}')
+                # if not os.path.isdir('wisdom'): os.mkdir('wisdom')
+                # with open(wisdom_fn, 'wb') as f:
+                    # pickle.dump(pyfftw.export_wisdom(), f)
 
-        # execute inverse FFT
-        logger.debug('Computing inverse FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
-        self.ifft_in[:] = delta_k
-        self.ifft_plan()
+        # # execute inverse FFT
+        # logger.debug('Computing inverse FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
+        # self.ifft_in[:] = delta_k
+        # self.ifft_plan()
 
-        return self.ifft_out.copy()
+        # return self.ifft_out.copy()
 
 
     # @cython.boundscheck(False)
     # @cython.cdivision(True)
     # @cython.wraparound(False)
-    # cdef _reset_survey_mask(self, delta_sm):
+    # def _smoothing(self, float radius, use_wisdom=False):
         # r"""
-        # In-place operation that resets cells outside survey region to mean density.
+        # Smooth density field with top-hat filter
 
         # Parameters
         # ----------
-        # delta_sm: array
-            # Smoothed overdensity mesh.
-        # """
-        # # cdef int i, j, k
-        # # cdef np.float32_t[:,:,::1] d_true = self.delta  
-        # # cdef float[:,:,::1] d_true = self.delta
 
-        # print('delta_sm (in function)', type(delta_sm))
-        # print('self.delta', type(self.delta))
-        # # d_true = self.delta
-        # # print(type(d_true))
-        
-        # logger.debug('Resetting survey mask')
-        # delta_sm[self.delta == 0.0] = 0.0
-        # # for i in range(self.nmesh[0]):
-            # # for j in range(self.nmesh[1]):
-                # # for k in range(self.nmesh[2]):
-                    # # # if density field outside survey region then set to average density
-                    # # if d_true[i,j,k] == 0.:
-                        # # delta_sm[i,j,k] = 0.
+        # radius: float
+            # Smoothing radius of top-hat filter.
+        # """
+
+        # cdef float prefact,kR,fact
+        # cdef int i, j, k, xdim, ydim, zdim
+        # cdef np.float32_t[::1] kkx, kky, kkz
+        # cdef np.complex64_t[:,:,::1] delta_k
+
+        # xdim, ydim, zdim = self.nmesh
+
+        # # compute FFT of field
+        # delta_k = self.FFT3Dr(use_wisdom=use_wisdom)
+
+        # # loop over Fourier modes
+        # logger.debug('Looping over fourier modes')
+        # kkx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')**2
+        # kky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')**2
+        # kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
+
+        # prefact = 2.0 * np.pi * radius
+        # for i in prange(xdim, nogil=True):
+            # for j in range(ydim):
+                # for k in range(zdim//2 + 1):
+
+                    # # skip when kx, ky and kz equal zero
+                    # if i==0 and j==0 and k==0:
+                        # continue 
+
+                    # # compute the value of |k|
+                    # kR = prefact * sqrt(kkx[i] + kky[j] + kkz[k])
+                    # if fabs(kR)<1e-5:  fact = 1.
+                    # else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
+                    # delta_k[i,j,k] =  fact * delta_k[i,j,k]
+
+        # delta_sm = self.IFFT3Dr(delta_k, use_wisdom=use_wisdom)
+
+        # # reset survey mask
+        # if not self.box_like:
+            # logger.info("Resetting survey mask")
+            # delta_sm[self.delta == 0.0] = 0.0
+            # # delta_sm = self._reset_survey_mask(delta_sm)
+            # # self._reset_survey_mask(&delta_sm)
 
         # return delta_sm
 
+    def _smoothing(self, float radius):
 
-    @cython.boundscheck(False)
-    @cython.cdivision(True)
-    @cython.wraparound(False)
-    def _smoothing(self, float radius, use_wisdom=False):
-        r"""
-        Smooth density field with top-hat filter
-
-        Parameters
-        ----------
-
-        radius: float
-            Smoothing radius of top-hat filter.
-        """
-
-        cdef float prefact,kR,fact
-        cdef int i, j, k, xdim, ydim, zdim
-        cdef np.float32_t[::1] kkx, kky, kkz
-        cdef np.complex64_t[:,:,::1] delta_k
-
-        xdim, ydim, zdim = self.nmesh
-
-        # compute FFT of field
-        delta_k = self.FFT3Dr(use_wisdom=use_wisdom)
-
-        # loop over Fourier modes
-        logger.debug('Looping over fourier modes')
-        kkx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')**2
-        kky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')**2
-        kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
-
-        prefact = 2.0 * np.pi * radius
-        for i in prange(xdim, nogil=True):
-            for j in range(ydim):
-                for k in range(zdim//2 + 1):
-
-                    # skip when kx, ky and kz equal zero
-                    if i==0 and j==0 and k==0:
-                        continue 
-
-                    # compute the value of |k|
-                    kR = prefact * sqrt(kkx[i] + kky[j] + kkz[k])
-                    if fabs(kR)<1e-5:  fact = 1.
-                    else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
-                    delta_k[i,j,k] =  fact * delta_k[i,j,k]
-
-        delta_sm = self.IFFT3Dr(delta_k, use_wisdom=use_wisdom)
+        (
+          delta_sm,
+          self.fft_plan,
+          self.fft_in,
+          self.fft_out,
+          self.ifft_plan,
+          self.ifft_in,
+          self.ifft_out
+        ) = tophat_smoothing(self.delta,
+                             radius,
+                             self.cellsize,
+                             threads=self.threads,
+                             use_wisdom=self.use_wisdom,
+                             fft_plan=self.fft_plan,
+                             ifft_plan=self.ifft_plan,
+                             fft_in=self.fft_in,
+                             fft_out=self.fft_out,
+                             ifft_in=self.ifft_in,
+                             ifft_out=self.ifft_out)
 
         # reset survey mask
         if not self.box_like:
-            logger.info("Resetting survey mask")
+            logger.debug("Resetting survey mask")
             delta_sm[self.delta == 0.0] = 0.0
-            # delta_sm = self._reset_survey_mask(delta_sm)
-            # self._reset_survey_mask(&delta_sm)
 
         return delta_sm
 
@@ -352,7 +350,7 @@ cdef class SphericalVoids:
         if self.box_like: 
             inv_rho_mean = 3 * self.volume / (4 * np.pi * data_w.sum())
         else:
-            rand_w = np.ones(self.rand_tree.n) if self.rand_weights is None else self.rand_weights
+            rand_w = np.ones(self.random_tree.n) if self.random_weights is None else self.random_weights
             inv_rho_mean = rand_w.sum() / data_w.sum()
 
         new_position = np.zeros_like(self.void_position)
@@ -437,8 +435,11 @@ cdef class SphericalVoids:
         cdef long local_voids
         cdef long[::1] indexes, IDs_temp
 
+        print("SURVEY TEST VERSION!")
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
+        # set whether to save and load FFT wisdom (useful for bulk runs)
+        self.use_wisdom = use_wisdom
 
         # find peaks
         if void_delta>0: 
@@ -524,9 +525,9 @@ cdef class SphericalVoids:
             mark_void_region  = VOL.mark_void_region
 
         # initial small-scale field smoothing to improve void center determination
-        if init_sm_frac and self.data_tree is not None:
-            logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
-            self.delta = self._smoothing(init_sm_frac * self.r_sep, use_wisdom=use_wisdom)
+        # if init_sm_frac and self.data_tree is not None:
+            # logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
+            # self.delta = self._smoothing(init_sm_frac * self.r_sep, use_wisdom=use_wisdom)
 
         # iterate through void radii
         total_voids_found = 0
@@ -535,7 +536,7 @@ cdef class SphericalVoids:
             R = self.Radii[q]
             logger.debug(f'Smoothing field with top-hat filter of radius {R:.1f} Mpc/h')
 
-            delta_sm = sign * self._smoothing(R, use_wisdom=use_wisdom)
+            delta_sm = sign * self._smoothing(R)
 
             # check void cells are present at this radius
             if np.min(delta_sm)>void_delta:
@@ -642,9 +643,9 @@ cdef class SphericalVoids:
 
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
         for i in range(self.Radii.size - 1):
-            norm = 1 / (self.volume * log(self.Radii[i] / self.Radii[i+1]))
-            vsf[0,i] = sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
+            norm = 1 / (self.volume * np.log(self.Radii[i] / self.Radii[i+1]))
+            vsf[0,i] = np.sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
             vsf[1,i] = self.void_count[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
-            vsf[2,i] = sqrt(self.void_count[i+1]) * norm  # poisson uncertainty
+            vsf[2,i] = np.sqrt(self.void_count[i+1]) * norm  # poisson uncertainty
 
         self.void_vsf      = np.asarray(vsf) 

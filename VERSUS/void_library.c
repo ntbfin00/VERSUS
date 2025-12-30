@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "void_openmp_library.h"
+#include "void_library.h"
 #include <omp.h>
 #include <math.h>
 
