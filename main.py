@@ -98,11 +98,11 @@ def main():
     logger.info(f"Saving output to {fn}*")
     if not args.dryrun:
         fn = filename(fn)
-        np.save(fn.format("positions"), VF.void_position)
-        np.save(fn.format("radii"), VF.void_radius)
-        np.save(fn.format("vsf"), VF.void_vsf)
+        np.save(fn.format("positions"), VF.position)
+        np.save(fn.format("radii"), VF.radius)
+        np.save(fn.format("vsf"), VF.size_function)
     else:
-        logger.info(f'Output: {dict(zip(VF.radii, VF.void_count))}')
+        logger.info(f'Output: {dict(zip(VF.input_radii, VF.count))}')
 
 
 if __name__ == "__main__":

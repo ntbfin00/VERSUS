@@ -61,11 +61,12 @@ cdef class SphericalVoids:
     cdef float void_overlap
     cdef int threads
     cdef bint use_wisdom 
-    cdef public object radii
-    cdef public object void_position
-    cdef public object void_radius
-    cdef public object void_count
-    cdef public object void_vsf
+    cdef public str vf_type
+    cdef public object input_radii
+    cdef public object position
+    cdef public object radius
+    cdef public object counts
+    cdef public object size_function
     cdef object fft_plan, ifft_plan, fft_in, fft_out, ifft_in, ifft_out
     
     def __init__(self, data_positions=None, data_weights=None, 
@@ -353,21 +354,22 @@ cdef class SphericalVoids:
             rand_w = np.ones(self.random_tree.n) if self.random_weights is None else self.random_weights
             inv_rho_mean = rand_w.sum() / data_w.sum()
 
-        new_position = np.zeros_like(self.void_position)
-        new_radius = np.zeros_like(self.void_radius)
-        self.Radii = self.Radii[:self.Radii.size-1]
-        Nvoids = np.zeros(self.Radii.size, dtype=np.int32)
+        new_position = np.zeros_like(self.position)
+        new_radius = np.zeros_like(self.radius)
+        Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
         N_tot = 0
-        for p in range(self.void_position.shape[0]):
-            pos = self.void_position[p]
-            for q in range(self.Radii.size):
+        for p in range(self.position.shape[0]):
+            pos = self.position[p]
+            for q in range(self.input_radii.size):
                 R = self.Radii[q]
 
                 delta_enc = data_w[self.data_tree.query_ball_point(pos, R, workers=self.threads)].sum()
                 if self.box_like: 
                     delta_enc /= R**3
                 else:
-                    delta_enc /= rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
+                    rand_count = rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
+                    if rand_count == 0: break
+                    delta_enc /= rand_count
                 delta_enc *= inv_rho_mean 
                 delta_enc -= 1
 
@@ -378,9 +380,9 @@ cdef class SphericalVoids:
                     N_tot += 1
                     break
 
-        self.void_position = new_position[:N_tot]
-        self.void_radius = new_radius[:N_tot]
-        self.void_count = np.asarray(Nvoids)
+        self.position = new_position[:N_tot]
+        self.radius = new_radius[:N_tot]
+        self.counts = np.asarray(Nvoids)
 
 
     def _sort_radii(self, float[:] radii):
@@ -435,7 +437,6 @@ cdef class SphericalVoids:
         cdef long local_voids
         cdef long[::1] indexes, IDs_temp
 
-        print("SURVEY TEST VERSION!")
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
         # set whether to save and load FFT wisdom (useful for bulk runs)
@@ -445,12 +446,11 @@ cdef class SphericalVoids:
         if void_delta>0: 
             sign = -1.
             void_delta *= -1
-            vf_type, ineq = ('peak', '>')
-            Rspurious = 0.
+            self.vf_type, ineq = ('peak', '>')
         # find voids
         else:
             sign = 1.
-            vf_type, ineq = ('void', '<')
+            self.vf_type, ineq = ('void', '<')
 
         Rspurious = self.rmin_spurious(sign)
         # set default radii if not provided
@@ -468,7 +468,7 @@ cdef class SphericalVoids:
 
         bins = self.Radii.size
         Rmin = np.min(self.Radii)
-        if Rmin < Rspurious: logger.warning(f"Spurious {vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
+        if Rmin < Rspurious: logger.warning(f"Spurious {self.vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
         if type(void_overlap) is bool: 
@@ -482,7 +482,7 @@ cdef class SphericalVoids:
         yzdim = ydim * zdim
         # set threads
         self.threads = os.cpu_count() if threads==0 else threads
-        logger.info(f'Running spherical {vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
+        logger.info(f'Running spherical {self.vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
         if Rmin<self.cellsize:
@@ -502,15 +502,12 @@ cdef class SphericalVoids:
         # define arrays containing void positions and radii
         void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
         void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
+        Nvoids = np.zeros(bins,   dtype=np.int32)
 
         # define the in_void and delta_v array
         in_void = np.zeros(self.nmesh, dtype=np.int64)
         delta_v = np.zeros(nmesh_tot,   dtype=np.float32)
         IDs     = np.zeros(nmesh_tot,   dtype=np.int64)
-
-        # define the arrays needed to compute the VSF
-        Nvoids = np.zeros(bins,   dtype=np.int32)
-        vsf    = np.zeros((3, bins-1), dtype=np.float32)
 
         # set function wrapping based on box-like
         if self.box_like:
@@ -523,11 +520,6 @@ cdef class SphericalVoids:
             num_voids_around1 = VOL.num_voids_around1
             num_voids_around2 = VOL.num_voids_around2
             mark_void_region  = VOL.mark_void_region
-
-        # initial small-scale field smoothing to improve void center determination
-        # if init_sm_frac and self.data_tree is not None:
-            # logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(init_sm_frac * self.r_sep))
-            # self.delta = self._smoothing(init_sm_frac * self.r_sep, use_wisdom=use_wisdom)
 
         # iterate through void radii
         total_voids_found = 0
@@ -616,22 +608,22 @@ cdef class SphericalVoids:
                     mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
                                      yzdim, R_grid2, i, j, k, threads=1)
 
-            logger.info(f'Found {voids_found} {vf_type}s with radius R={R:.1f} Mpc/h')
+            logger.info(f'Found {voids_found} {self.vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
             void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
             void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
             logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f})'.format(void_cell_fraction, void_volume_fraction))
 
-        logger.info(f'{total_voids_found} total {vf_type}s found.')
-        logger.info(f'Occupied {vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f})')
+        logger.info(f'{total_voids_found} total {self.vf_type}s found.')
+        logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f})')
 
         # finish by setting the class fields
-        position = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
-        self.void_position = position * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
-        self.void_radius   = np.asarray(void_rad[:total_voids_found]) * self.cellsize
-        self.radii         = np.asarray(self.Radii)
-        self.void_count    = np.asarray(Nvoids)
+        self.input_radii = np.asarray(self.Radii[:self.Radii.size-1])
+        pos              = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
+        self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
+        self.radius      = np.asarray(void_rad[:total_voids_found]) * self.cellsize
+        self.counts       = np.asarray(Nvoids)
 
         # post-process voids by counting enclosed galaxies
         if self.data_tree is None:
@@ -639,13 +631,72 @@ cdef class SphericalVoids:
         else:
             self.check_real_space(sign)
 
-        self.void_position += self.box_shift
+        self.position += self.box_shift
 
         # compute the void size function (dn/dlnR = # of voids/Volume/delta(lnR))
-        for i in range(self.Radii.size - 1):
-            norm = 1 / (self.volume * np.log(self.Radii[i] / self.Radii[i+1]))
-            vsf[0,i] = np.sqrt(self.Radii[i] * self.Radii[i+1])  # geometric mean radius for logarithmic scale
-            vsf[1,i] = self.void_count[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
-            vsf[2,i] = np.sqrt(self.void_count[i+1]) * norm  # poisson uncertainty
+        vsf = np.zeros((3, self.input_radii.size - 1), dtype=np.float32)
+        for i in range(self.input_radii.size - 1):
+            norm = 1 / (self.volume * np.log(self.input_radii[i] / self.input_radii[i+1]))
+            vsf[0,i] = np.sqrt(self.input_radii[i] * self.input_radii[i+1])  # geometric mean radius for logarithmic scale
+            vsf[1,i] = self.counts[i+1] * norm  # vsf (voids >R[i] will be detected with smoothing of R[i])
+            vsf[2,i] = np.sqrt(self.counts[i+1]) * norm  # poisson uncertainty
 
-        self.void_vsf      = np.asarray(vsf) 
+        self.size_function = np.asarray(vsf) 
+
+
+    def plot_size_function(self, dndlnr=True, poisson_err=True, log=False,
+                           legend=False, grid=False, ax=None, save_fn=None, **kwargs):
+        r"""
+        Plot the void size function.
+
+        Parameters
+        ----------
+
+        dndlnr: bool, default=True
+            Plot number density of voids per logarithmic radius interval. If False, plot number density of voids n(R).
+
+        poisson_err: bool, default=True
+            Plot errors estimated assuming Poisson distributed void number counts. True errors should be computed from mock simulations.
+
+        log: bool, default=False
+            Plot size abundance on logarithmic scale.
+
+        legend: bool, default=False
+            Plot legend.
+
+        grid: bool, default=False
+            Plot grid.
+
+        ax: matplotlib.axes, default=None
+            Optional axes for figure.
+
+        save_fn: str, default=None
+            Path to save figure.
+        """
+        import matplotlib.pyplot as plt
+
+        if self.input_radii is None:
+            raise Exception("Must run SphericalVoids.run_voidfinder() first in order to use this function.")
+
+        if ax is None: fig, ax = plt.subplots(1)
+
+        if dndlnr:
+            ylabel = rf'$d n_{{\rm {self.vf_type}}} / d \ln R_{{\rm {self.vf_type}}} \,\,[h^4{{\rm Mpc}}^{{-4}}]$'
+            x, y, err = self.size_function
+        else:
+            ylabel = rf'$n_{{\rm {self.vf_type}}}\,\,[h^3{{\rm Mpc}}^{{-3}}]$'
+            y = self.counts.astype('float32')
+            x, err = self.input_radii, np.sqrt(y) / self.volume
+            y /= self.volume
+
+        ax.errorbar(x, y, err if poisson_err else None, **kwargs)
+        ax.set_ylabel(ylabel, fontsize=15)
+        ax.set_xlabel(r'$R_{\rm void}\, [h^{-1}{\rm Mpc}]$', fontsize=15)
+        if log: ax.set_yscale('log')
+        if grid: ax.grid()
+        if legend: ax.legend()
+
+        if save_fn is not None: plt.savefig(save_fn)
+
+        return ax
+
