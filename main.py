@@ -102,7 +102,7 @@ def main():
         np.save(fn.format("radii"), VF.radius)
         np.save(fn.format("vsf"), VF.size_function)
     else:
-        logger.info(f'Output: {dict(zip(VF.input_radii, VF.count))}')
+        logger.info(f'Output: {dict(zip(VF.input_radii, VF.counts))}')
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from .smoothing import tophat_smoothing
 
 logger = logging.getLogger(__name__)
 
-# @cython.cclass
 class DensityMesh:
     r"""                                                                                                                                          
     Generate density mesh from galaxy and random positions. 
@@ -189,7 +188,7 @@ class DensityMesh:
 
         return mesh
 
-    def _set_mesh_density(self, mesh, init_sm_frac=0.45, threshold_randoms=0.01):
+    def _set_mesh_density(self, mesh, init_sm_frac=0.45, threshold_randoms=0.01, use_wisdom=False):
         r"""
         Populate mesh with galaxies and randoms
 
@@ -213,7 +212,8 @@ class DensityMesh:
         mesh.mesh_delta.value = tophat_smoothing(mesh.mesh_data, 
                                                  r_smooth,
                                                  mesh.cellsize[0],
-                                                 threads=self.threads)[0]
+                                                 threads=self.threads,
+                                                 use_wisdom=use_wisdom)[0]
         del mesh.mesh_data
 
         if self.box_like:
@@ -224,7 +224,8 @@ class DensityMesh:
             mesh.mesh_randoms.value = tophat_smoothing(mesh.mesh_randoms, 
                                                        r_smooth,
                                                        mesh.cellsize[0],
-                                                       threads=self.threads)[0]
+                                                       threads=self.threads,
+                                                       use_wisdom=use_wisdom)[0]
 
             sum_data, sum_randoms = mesh.mesh_delta.csum(), mesh.mesh_randoms.csum()
             alpha = sum_data * 1. / sum_randoms
@@ -238,13 +239,15 @@ class DensityMesh:
             mesh.rho_mean = np.zeros(mesh.mesh_delta.slabs.nslabs)
             for (i, (delta, randoms)) in enumerate(zip(mesh.mesh_delta.slabs, mesh.mesh_randoms.slabs)):
                 mask = randoms > threshold
+                if mask.sum() == 0: continue
+
                 delta[mask] /= (alpha * randoms)[mask]
                 delta[~mask] = 0.
 
                 mesh.rho_mean[i] = np.mean((alpha * randoms)[mask])
 
             del mesh.mesh_randoms
-            mesh.rho_mean = np.nanmean(mesh.rho_mean) / mesh.cellsize.prod()
+            mesh.rho_mean = np.mean(mesh.rho_mean, where=mesh.rho_mean>0) / mesh.cellsize.prod()
 
 
     def run_recon(self, f=None, bias=None, los=None, engine='IterativeFFTReconstruction', 
@@ -301,7 +304,7 @@ class DensityMesh:
             logger.setLevel(logging.WARNING)
 
         # create mesh flush with survey volume
-        mesh = self._set_mesh(boxpad=1., nmesh=nmesh, bias=1.)#cellsize=cellsize)
+        mesh = self._set_mesh(boxpad=1., nmesh=nmesh, bias=1.)
         # first estimate of volume (true if box)
         self.volume = mesh.boxsize.prod()
         # first estimate of mean density
@@ -323,7 +326,7 @@ class DensityMesh:
         logger.setLevel(old_level)
 
         
-    def create_mesh(self, boxpad=1.1, cellsize=4., init_sm_frac=0.45, save_mesh=None, **kwargs):
+    def create_mesh(self, boxpad=1.1, cellsize=4., init_sm_frac=0.45, save_mesh=None, use_wisdom=False, **kwargs):
         r"""
         Create the density mesh
 
@@ -344,6 +347,9 @@ class DensityMesh:
         save_mesh : bool, string, default=None
             If not ``None``, path where to save the mesh in FITS format.
             If ``True``, the mesh will be saved in the default path: f'mesh/mesh_<nbins_vf>_<dtype>.fits'.
+
+        use_wisdom : bool
+            Whether to load/save FFTW wisdom.
 
         kwargs : dict
             Optional arguments for DensityMesh._set_mesh_density().
@@ -366,7 +372,7 @@ class DensityMesh:
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
         logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
-        self._set_mesh_density(mesh, **kwargs)
+        self._set_mesh_density(mesh, use_wisdom=use_wisdom, **kwargs)
 
         self.delta = mesh.mesh_delta.value
         self.nmesh = mesh.nmesh

@@ -1,14 +1,10 @@
 import os
-# import pickle
 from astropy.io import fits
-# import pyfftw
 import numpy as np
 cimport numpy as np
 cimport cython
-# from cython.parallel import prange, parallel
-# from libc.math cimport sqrt,pow,sin,cos,log,log10,fabs,round
 import logging
-cimport void_library as VOL
+cimport void_library as VL
 from .meshbuilder import DensityMesh
 from .smoothing import tophat_smoothing
 from scipy.spatial import cKDTree
@@ -36,11 +32,29 @@ cdef class SphericalVoids:
     data_cols: list, default=None
         List of data/random position column headers. Fourth element is taken as the weights (if present). Defaults to ['RA','DEC','Z'] if randoms are provided and ['X','Y','Z'] if not.
 
-    delta_mesh: array, Path
+    reconstruct: str, default=None
+        Type of density field reconstruction passed to DensityMesh.run_recon(). Defaults to no reconstruction.
+
+    recon_args: dict, default=None
+        Reconstruction arguments ('f', 'bias', 'los', 'engine' and 'smoothing radius') passed to DensityMesh.run_recon().
+
+    delta_mesh: array, Path, default=None
         If data_positions not provided, load density mesh directly from array or from path to pre-saved mesh FITS file. 
 
-    mesh_args: dict
+    mesh_args: dict, default=None
         Dictionary to hold cellsize, boxsize, boxcenter and box_like attributes. Must be provided if delta_mesh provided as array, else read from file.
+
+    dtype: str, default='f4'
+        Data type of mesh to generate. Defaults to Float32.
+
+    boxsize: array (3), default=None
+        Dimensions of simulation box (not to be used in the case of survey data).
+
+    boxcenter: array (3), default=None
+        Centre position of simulation box (not to be used in the case of survey data).
+
+    use_wisdom: bool, default=False
+        Whether to save and load wisdom during FFT computations. Advantageous for serial void-finding runs.
 
     kwargs : dict
         Optional arguments for meshbuilder.DensityMesh object.
@@ -72,10 +86,13 @@ cdef class SphericalVoids:
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
                  reconstruct=None, recon_args=None, delta_mesh=None, mesh_args=None, 
-                 dtype='f4', boxsize=None, boxcenter=None, **kwargs):
+                 dtype='f4', boxsize=None, boxcenter=None, use_wisdom=False, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
                       'data_positions', 'random_positions', 'data_weights', 'random_weights']
+
+        # set whether to save and load FFT wisdom (useful for bulk runs)
+        self.use_wisdom = use_wisdom
 
         # create mesh from positions
         if data_positions is not None:
@@ -83,7 +100,7 @@ cdef class SphericalVoids:
                                      random_positions=random_positions, random_weights=random_weights, 
                                      data_cols=data_cols, reconstruct=reconstruct, recon_args=recon_args,
                                      dtype=dtype, boxsize=boxsize, boxcenter=boxcenter)
-            delta_mesh.create_mesh(**kwargs)
+            delta_mesh.create_mesh(use_wisdom=self.use_wisdom, **kwargs)
             for name in properties:
                 if name.endswith('_positions'):
                     setattr(self, name[:-9] + 'tree', getattr(delta_mesh, name))
@@ -126,10 +143,11 @@ cdef class SphericalVoids:
         logger.debug(f"Mesh data type: {self.delta.dtype}")
 
         if self.data_tree is not None:
-            logger.info('Making k-d trees')
+            logger.info('Building k-d trees')
             self.data_tree = cKDTree((self.data_tree - self.box_shift) % self.boxsize, compact_nodes=False, 
                                      balanced_tree=False, boxsize=self.boxsize if self.box_like else None)
-            self.random_tree = None if self.box_like else cKDTree(self.random_tree, compact_nodes=False, balanced_tree=False)
+            self.random_tree = None if self.box_like else cKDTree((self.random_tree - self.box_shift) % self.boxsize, 
+                                                                  compact_nodes=False, balanced_tree=False)
 
     def load_mesh(self, mesh_fn):
         r"""
@@ -165,143 +183,6 @@ cdef class SphericalVoids:
 
         rho_mean = 3 / (4 * np.pi * self.r_sep**3)
         return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
-
-
-    # def FFT3Dr(self, use_wisdom=False):
-
-        # if self.fft_plan is None:
-
-            # self.fft_in  = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-            # self.fft_out = pyfftw.empty_aligned((self.delta.shape[0],
-                                                 # self.delta.shape[1],
-                                                 # self.delta.shape[2]//2 + 1), 
-                                                 # dtype='complex64')
-
-            # # load wisdom
-            # axes = ['nx','ny','nz']
-            # nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
-            # wisdom_fn = os.path.join('wisdom', f'fft_wisdom_{nbins}.txt')
-            # if use_wisdom and os.path.exists(wisdom_fn):
-                # logger.info(f'Importing FFT wisdom from {wisdom_fn}')
-                # with open(wisdom_fn, 'rb') as f:
-                    # pyfftw.import_wisdom(pickle.load(f))
-
-            # # create plan
-            # logger.debug('Creating FFT plan')
-            # self.fft_plan = pyfftw.FFTW(self.fft_in, self.fft_out, 
-                                        # axes=(0,1,2), direction='FFTW_FORWARD', threads=self.threads,
-                                        # flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
-
-            # # save wisdom
-            # if use_wisdom and not os.path.exists(wisdom_fn):
-                # logger.info(f'Saving FFT wisdom to {wisdom_fn}')
-                # if not os.path.isdir('wisdom'): os.mkdir('wisdom')
-                # with open(wisdom_fn, 'wb') as f:
-                    # pickle.dump(pyfftw.export_wisdom(), f)
-
-        # # execute FFT
-        # logger.debug('Computing forwards FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
-        # self.fft_in[:] = self.delta
-        # self.fft_plan()
-
-        # return self.fft_out
-
-
-    # def IFFT3Dr(self, np.complex64_t[:,:,::1] delta_k, use_wisdom=False):
-
-        # if self.ifft_plan is None:
-
-            # self.ifft_out = pyfftw.empty_aligned(self.delta.shape, dtype='float32')
-            # self.ifft_in  = pyfftw.empty_aligned((self.delta.shape[0],
-                                                  # self.delta.shape[1],
-                                                  # self.delta.shape[2]//2 + 1), 
-                                                  # dtype='complex64')
-
-            # # load wisdom
-            # axes = ['nx','ny','nz']
-            # nbins = '_'.join(axes[i] + str(n) for (i,n) in enumerate(self.nmesh))
-            # wisdom_fn = os.path.join('wisdom', f'ifft_wisdom_{nbins}.txt')
-            # if use_wisdom and os.path.exists(wisdom_fn):
-                # logger.debug('Importing IFFT wisdom')
-                # with open(wisdom_fn, 'rb') as f:
-                    # pyfftw.import_wisdom(pickle.load(f))
-
-            # # create plan
-            # logger.debug('Creating IFFT plan')
-            # self.ifft_plan = pyfftw.FFTW(self.ifft_in, self.ifft_out,
-                                         # axes=(0,1,2), direction='FFTW_BACKWARD', threads=self.threads,
-                                         # flags=('FFTW_MEASURE',) if use_wisdom else ('FFTW_ESTIMATE',))
-
-            # # save wisdom
-            # if use_wisdom and not os.path.exists(wisdom_fn):
-                # logger.debug(f'Saving IFFT wisdom to {wisdom_fn}')
-                # if not os.path.isdir('wisdom'): os.mkdir('wisdom')
-                # with open(wisdom_fn, 'wb') as f:
-                    # pickle.dump(pyfftw.export_wisdom(), f)
-
-        # # execute inverse FFT
-        # logger.debug('Computing inverse FFT using {}'.format('MEASURE' if use_wisdom else 'ESTIMATE'))
-        # self.ifft_in[:] = delta_k
-        # self.ifft_plan()
-
-        # return self.ifft_out.copy()
-
-
-    # @cython.boundscheck(False)
-    # @cython.cdivision(True)
-    # @cython.wraparound(False)
-    # def _smoothing(self, float radius, use_wisdom=False):
-        # r"""
-        # Smooth density field with top-hat filter
-
-        # Parameters
-        # ----------
-
-        # radius: float
-            # Smoothing radius of top-hat filter.
-        # """
-
-        # cdef float prefact,kR,fact
-        # cdef int i, j, k, xdim, ydim, zdim
-        # cdef np.float32_t[::1] kkx, kky, kkz
-        # cdef np.complex64_t[:,:,::1] delta_k
-
-        # xdim, ydim, zdim = self.nmesh
-
-        # # compute FFT of field
-        # delta_k = self.FFT3Dr(use_wisdom=use_wisdom)
-
-        # # loop over Fourier modes
-        # logger.debug('Looping over fourier modes')
-        # kkx = np.fft.fftfreq(xdim, self.cellsize).astype('f4')**2
-        # kky = np.fft.fftfreq(ydim, self.cellsize).astype('f4')**2
-        # kkz = np.fft.rfftfreq(zdim, self.cellsize).astype('f4')**2
-
-        # prefact = 2.0 * np.pi * radius
-        # for i in prange(xdim, nogil=True):
-            # for j in range(ydim):
-                # for k in range(zdim//2 + 1):
-
-                    # # skip when kx, ky and kz equal zero
-                    # if i==0 and j==0 and k==0:
-                        # continue 
-
-                    # # compute the value of |k|
-                    # kR = prefact * sqrt(kkx[i] + kky[j] + kkz[k])
-                    # if fabs(kR)<1e-5:  fact = 1.
-                    # else:              fact = 3.0*(sin(kR) - cos(kR)*kR)/(kR*kR*kR)
-                    # delta_k[i,j,k] =  fact * delta_k[i,j,k]
-
-        # delta_sm = self.IFFT3Dr(delta_k, use_wisdom=use_wisdom)
-
-        # # reset survey mask
-        # if not self.box_like:
-            # logger.info("Resetting survey mask")
-            # delta_sm[self.delta == 0.0] = 0.0
-            # # delta_sm = self._reset_survey_mask(delta_sm)
-            # # self._reset_survey_mask(&delta_sm)
-
-        # return delta_sm
 
     def _smoothing(self, float radius):
 
@@ -345,6 +226,9 @@ cdef class SphericalVoids:
 
         # ensure correct expression for clusters
         void_delta = sign * self.void_delta
+
+        # counts in smallest bin are underestimated due to missed upscattering from smaller radii
+        self.input_radii = self.input_radii[:self.input_radii.size-1]
 
         # compute factor for density calculation
         data_w = np.ones(self.data_tree.n) if self.data_weights is None else self.data_weights
@@ -393,7 +277,7 @@ cdef class SphericalVoids:
     @cython.cdivision(True)
     @cython.wraparound(False)
     def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, 
-                        float init_sm_frac=0.45, int threads=8, use_wisdom=False):
+                        float init_sm_frac=0.45, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -415,8 +299,6 @@ cdef class SphericalVoids:
         threads: int, default=8
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
 
-        use_wisdom: bool, default=False
-            Whether to save and load wisdom during FFT computations. Advantageous for serial void-finding runs.
         """
         cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
         cdef float R, R_grid, R_grid2, Rmin, Rspurious
@@ -439,8 +321,6 @@ cdef class SphericalVoids:
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
-        # set whether to save and load FFT wisdom (useful for bulk runs)
-        self.use_wisdom = use_wisdom
 
         # find peaks
         if void_delta>0: 
@@ -512,14 +392,14 @@ cdef class SphericalVoids:
         # set function wrapping based on box-like
         if self.box_like:
             logger.debug("Using wrapped VF algorithms")
-            num_voids_around1 = VOL.num_voids_around1_wrap
-            num_voids_around2 = VOL.num_voids_around2_wrap
-            mark_void_region  = VOL.mark_void_region_wrap
+            num_voids_around1 = VL.num_voids_around1_wrap
+            num_voids_around2 = VL.num_voids_around2_wrap
+            mark_void_region  = VL.mark_void_region_wrap
         else:
             logger.debug("Using VF algorithms with boundary conditions")
-            num_voids_around1 = VOL.num_voids_around1
-            num_voids_around2 = VOL.num_voids_around2
-            mark_void_region  = VOL.mark_void_region
+            num_voids_around1 = VL.num_voids_around1
+            num_voids_around2 = VL.num_voids_around2
+            mark_void_region  = VL.mark_void_region
 
         # iterate through void radii
         total_voids_found = 0
@@ -619,7 +499,7 @@ cdef class SphericalVoids:
         logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f})')
 
         # finish by setting the class fields
-        self.input_radii = np.asarray(self.Radii[:self.Radii.size-1])
+        self.input_radii = np.asarray(self.Radii)
         pos              = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.radius      = np.asarray(void_rad[:total_voids_found]) * self.cellsize
@@ -672,6 +552,9 @@ cdef class SphericalVoids:
 
         save_fn: str, default=None
             Path to save figure.
+
+        kwargs:
+            Optional arguments for matplotlib.pyplot.errorbar().
         """
         import matplotlib.pyplot as plt
 
@@ -695,6 +578,95 @@ cdef class SphericalVoids:
         if log: ax.set_yscale('log')
         if grid: ax.grid()
         if legend: ax.legend()
+
+        if save_fn is not None: plt.savefig(save_fn)
+
+        return ax
+
+
+    def plot_slice(self, slice_axis='Z', slice_range=(30,80), data_positions=None, 
+                   legend=False, grid=False, ax=None, save_fn=None, **kwargs):
+        r"""
+        Plot the void size function.
+
+        Parameters
+        ----------
+
+        slice_axis: str, default='Z'
+            Axis of mesh to slice along.
+
+        slice_range: tuple, default=(30, 80)
+            Lower and upper limits of slice_axis to slice.
+
+        data_positions: array, default=None
+            Array of data positions to plot. If None, instead plot the overdensity mesh.
+
+        legend: bool, default=False
+            Plot legend.
+
+        grid: bool, default=False
+            Plot grid.
+
+        ax: matplotlib.axes, default=None
+            Optional axes for figure. If not None, only the voids/peaks are plotted (no galaxies/delta mesh).
+
+        save_fn: str, default=None
+            Path to save figure.
+
+        kwargs:
+            Optional arguments for matplotlib.patches.Circle().
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Circle
+
+        if self.input_radii is None:
+            raise Exception("Must run SphericalVoids.run_voidfinder() first in order to use this function.")
+
+        axes_labels = ['X','Y','Z']
+        axis = axes_labels.index(slice_axis.upper())
+        axes_labels.pop(axis)
+        axes = [0, 1, 2]
+        axes.pop(axis)
+        boxlims = np.c_[self.box_shift, self.boxsize + self.box_shift]
+
+        # filter spheres
+        mask_sp = (self.position[:,axis] >= slice_range[0]) & (self.position[:,axis] <= slice_range[1])
+        centers = self.position[mask_sp]
+        radii = self.radius[mask_sp]
+
+        if ax is None: 
+            fig, ax = plt.subplots(1, figsize=(8,8))
+            # filter density grid
+            if data_positions is None:
+                lim = (slice_range - self.box_shift[axis]) / self.cellsize
+                xy_slice = self.delta.take(indices=range(int(lim[0]), int(lim[1])), axis=axis)
+                xy_slice = xy_slice.mean(axis=axis)
+                extent = [*boxlims[axes[0]], *boxlims[axes[1]]]
+                ax.imshow(xy_slice.T, origin='lower', extent=extent, cmap='plasma')
+            # filter galaxies 
+            else:
+                mask_xy = (data_positions[:,axis] >= slice_range[0]) & (data_positions[:,axis] <= slice_range[1])
+                xy_slice = data_positions[mask_xy]
+                ax.scatter(xy_slice[:,axes[0]], xy_slice[:,axes[1]], s=0.1, color='black')
+
+        # create plot
+        label = kwargs.pop('label', None)
+        color = kwargs.pop('color', 'red')
+        for (i, (c, r)) in enumerate(zip(centers, radii)):
+            circ = Circle((c[axes[0]], c[axes[1]]), r, fill=False, edgecolor=color, 
+                          label=None if i>0 else label, **kwargs)
+            ax.add_patch(circ)
+        ax.set_xlabel(axes_labels[0] + r' $[h^{-1}{\rm Mpc}]$', fontsize=15)
+        ax.set_ylabel(axes_labels[1] + r' $[h^{-1}{\rm Mpc}]$', fontsize=15)
+        ax.set_xlim(boxlims[axes[0]])
+        ax.set_ylim(boxlims[axes[1]])
+        ax.set_title((rf'{slice_range[0]} $[h^{{-1}}{{\rm Mpc}}]$' 
+                    + rf'$\leq {slice_axis.upper()} \leq$' 
+                    + rf'{slice_range[1]} $[h^{{-1}}{{\rm Mpc}}]$'),
+                    fontsize=15)
+        ax.set_aspect('equal')
+
+        if legend: ax.legend(loc='upper right')
 
         if save_fn is not None: plt.savefig(save_fn)
 
