@@ -1,4 +1,7 @@
-# VERSUS
+<p align="left">
+  <img src="logo.png?raw=true" alt="VERSUS logo"/>
+</p>
+
 ### Void Extraction in Real-space of Spherical UnderdensitieS
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
@@ -41,7 +44,7 @@ vf.counts     	  # number of voids of a given radius
 vf.size_function  # void size function (r, vsf, error)
 ```
 
-If making repeated measurements on a fixed mesh, enable the FFT wisdom to be saved using the ```use_wisdom=True``` flag in ```VF.run_voidfinding```. The wisdom text files will be stored in the ```wisdom``` directory.
+If making repeated measurements on a fixed mesh, enable the FFT wisdom to be saved using the ```use_wisdom=True``` flag when instantiating the ```SphericalVoids``` class. The wisdom text files will be stored in the ```wisdom``` directory.
 
 If positive values for ```void_delta``` (default ```void_delta=-0.8```) in ```VF.run_voidfinding``` are entered, the algorithm will instead search for density peaks with enclosed density ```delta > void_delta```.
 
