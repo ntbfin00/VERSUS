@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="logo_w.png?raw=true">
-  <source media="(prefers-color-scheme: light)" srcset="logo_b.png?raw=true">
+  <source media="(prefers-color-scheme: dark)" srcset="logo_w.png?raw=true" height=80/>
+  <source media="(prefers-color-scheme: light)" srcset="logo_b.png?raw=true" height=80/>
   <img alt="VERSUS logo">
 </picture>
 
