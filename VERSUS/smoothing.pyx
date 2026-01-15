@@ -164,9 +164,9 @@ def tophat_smoothing(
 
     # loop over Fourier modes
     logger.debug('Looping over fourier modes')
-    kkx = np.fft.fftfreq(xdim, cellsize).astype('f4')**2
-    kky = np.fft.fftfreq(ydim, cellsize).astype('f4')**2
-    kkz = np.fft.rfftfreq(zdim, cellsize).astype('f4')**2
+    kkx = np.fft.fftfreq(xdim, cellsize[0]).astype('f4')**2
+    kky = np.fft.fftfreq(ydim, cellsize[1]).astype('f4')**2
+    kkz = np.fft.rfftfreq(zdim, cellsize[2]).astype('f4')**2
 
     prefact = 2.0 * np.pi * radius
     for i in prange(xdim, nogil=True):

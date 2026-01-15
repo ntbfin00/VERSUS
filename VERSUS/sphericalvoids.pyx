@@ -62,7 +62,7 @@ cdef class SphericalVoids:
 
     cdef public object delta, data_tree, random_tree, data_weights, random_weights
     cdef public int[3] nmesh
-    cdef public float cellsize
+    cdef public float[3] cellsize
     cdef public float r_sep 
     cdef public float[3] boxsize
     cdef public float[3] boxcenter
@@ -138,7 +138,7 @@ cdef class SphericalVoids:
             raise Exception('Either data_positions or delta_mesh must be provided')
 
         self.nmesh = self.delta.shape
-        self.cellsize = self.boxsize[0] / self.nmesh[0]
+        self.cellsize = np.asarray(self.boxsize) / np.asarray(self.nmesh)
         self.box_shift = np.asarray(self.boxcenter, dtype=np.float32) - np.asarray(self.boxsize, dtype=np.float32)/2 
         logger.debug(f"Mesh data type: {self.delta.dtype}")
 
@@ -321,6 +321,7 @@ cdef class SphericalVoids:
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
+        cellsize = np.mean(self.cellsize)
 
         # find peaks
         if void_delta>0: 
@@ -336,8 +337,8 @@ cdef class SphericalVoids:
         # set default radii if not provided
         if radii[0] == 0.:
             Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
-            self.Radii = Radii[(Radii > self.cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
-            logger.debug(f'Radii set by default: cellsize={self.cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
+            self.Radii = Radii[(Radii > cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
+            logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
             # ensure extra bin for void resizing
             if self.data_tree is not None:
@@ -365,13 +366,13 @@ cdef class SphericalVoids:
         logger.info(f'Running spherical {self.vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
-        if Rmin<self.cellsize:
-            raise Exception(f"Minimum radius {Rmin:.1f} is below cellsize {self.cellsize:.1f}")
+        if Rmin < cellsize:
+            raise Exception(f"Minimum radius {Rmin:.1f} is below cellsize {cellsize:.2f}")
         # if (abs(np.diff(self.Radii))<self.cellsize).any():
             # logger.warning(f"Radii are binned more finely than cellsize {self.cellsize:.1f}. May induce bin-to-bin correlations.")
 
         # determine mesh volume
-        vol_mesh = self.cellsize**3 * nmesh_tot
+        vol_mesh = np.prod(self.cellsize) * nmesh_tot
         # determine non-overlapping volume of smallest void
         vol_void = (1 - self.void_overlap) * 4 * np.pi * Rmin**3 / 3
         # determine maximum possible number of voids
@@ -440,7 +441,7 @@ cdef class SphericalVoids:
             logger.debug('Sorting of underdense cells finished.')
 
             # determine void radius in terms of number of mesh cells
-            R_grid = R/self.cellsize; Ncells = <int>R_grid + 1
+            R_grid = R / cellsize; Ncells = <int>R_grid + 1
             R_grid2 = R_grid * R_grid
             voids_found = 0 
 
@@ -502,7 +503,7 @@ cdef class SphericalVoids:
         self.input_radii = np.asarray(self.Radii)
         pos              = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
-        self.radius      = np.asarray(void_rad[:total_voids_found]) * self.cellsize
+        self.radius      = np.asarray(void_rad[:total_voids_found]) * cellsize
         self.counts       = np.asarray(Nvoids)
 
         # post-process voids by counting enclosed galaxies
@@ -638,7 +639,7 @@ cdef class SphericalVoids:
             fig, ax = plt.subplots(1, figsize=(8,8))
             # filter density grid
             if data_positions is None:
-                lim = (slice_range - self.box_shift[axis]) / self.cellsize
+                lim = (slice_range - self.box_shift[axis]) / self.cellsize[axis]
                 xy_slice = self.delta.take(indices=range(int(lim[0]), int(lim[1])), axis=axis)
                 xy_slice = xy_slice.mean(axis=axis)
                 extent = [*boxlims[axes[0]], *boxlims[axes[1]]]

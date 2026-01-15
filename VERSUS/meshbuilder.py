@@ -211,7 +211,7 @@ class DensityMesh:
         mesh.mesh_delta = mesh.mesh_data.copy()
         mesh.mesh_delta.value = tophat_smoothing(mesh.mesh_data, 
                                                  r_smooth,
-                                                 mesh.cellsize[0],
+                                                 mesh.cellsize,
                                                  threads=self.threads,
                                                  use_wisdom=use_wisdom)[0]
         del mesh.mesh_data
@@ -223,7 +223,7 @@ class DensityMesh:
         else:
             mesh.mesh_randoms.value = tophat_smoothing(mesh.mesh_randoms, 
                                                        r_smooth,
-                                                       mesh.cellsize[0],
+                                                       mesh.cellsize,
                                                        threads=self.threads,
                                                        use_wisdom=use_wisdom)[0]
 
