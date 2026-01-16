@@ -1,4 +1,4 @@
-cdef extern from "void_openmp_library.h":
+cdef extern from "void_library.h":
 
       int num_voids_around1(float void_overlap, long total_voids_found, 
                             int xdim, int ydim, int zdim,

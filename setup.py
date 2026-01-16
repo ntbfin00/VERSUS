@@ -14,13 +14,22 @@ extensions = [
             "VERSUS.sphericalvoids",
             [
                 "VERSUS/sphericalvoids.pyx",
-                "VERSUS/void_openmp_library.c"
+                "VERSUS/void_library.c"
             ],
             extra_compile_args=extra_compile_args,
             extra_link_args=[omp_flag],
             libraries=["m"]
-            )
-        ]
+        ),
+
+        Extension(
+            "VERSUS.smoothing",
+            ["VERSUS/smoothing.pyx"],
+            extra_compile_args=extra_compile_args,
+            extra_link_args=[omp_flag],
+            libraries=["m"],
+        ),
+
+]
 
 setup(
     name="VERSUS",  # Name of the project

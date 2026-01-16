@@ -1,9 +1,14 @@
-# VERSUS
-### Void Extraction in Real-space of Spherical UnderdensitieS
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo_w.png?raw=true" height=80/>
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo_b.png?raw=true" height=80/>
+  <img alt="VERSUS logo">
+</picture>
+
+# Void Extraction in Real-space of Spherical UnderdensitieS
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
 <p align="center">
-  <img src="flowchart.png?raw=true" alt="VERSUS algorithm"/>
+  <img src="assets/flowchart.png?raw=true" alt="VERSUS algorithm"/>
 </p>
 
 
@@ -34,12 +39,26 @@ VF.run_voidfinding(radii, **void_finder_kwargs)
 vf = SphericalVoids(delta_mesh=<path/to/mesh>, ...)
 
 # Output:
-vf.void_position  # void positions
-vf.void_radius    # void radii
-vf.void_count     # number of voids of a given radius
-vf.vsf            # void size function (r, vsf, error)
+vf.input_radii    # input smoothing radii for void-finder
+vf.position  	  # void positions
+vf.radius    	  # void radii
+vf.counts     	  # number of voids of a given radius
+vf.size_function  # void size function (r, vsf, error)
 ```
 
-If making repeated measurements on a fixed mesh, enable the FFT wisdom to be saved using the ```use_wisdom=True``` flag in ```VF.run_voidfinding```. The wisdom text files will be stored in the ```wisdom``` directory.
+If making repeated measurements on a fixed mesh, enable the FFT wisdom to be saved using the ```use_wisdom=True``` flag when instantiating the ```SphericalVoids``` class. The wisdom text files will be stored in the ```wisdom``` directory.
 
 If positive values for ```void_delta``` (default ```void_delta=-0.8```) in ```VF.run_voidfinding``` are entered, the algorithm will instead search for density peaks with enclosed density ```delta > void_delta```.
+
+## Citation
+If you use this code in a scientific publication, please cite:
+
+```
+@unpublished{Findlay2026prep,
+  author = "Findlay, Nathan and Nadathur, Seshadri",
+  title  = "Void-finding with VERSUS: Mitigating systematic bias in void sizes with discrete tracer
+samples",
+  note   = "(in prep.)",
+  year   = "2026"
+}
+```
