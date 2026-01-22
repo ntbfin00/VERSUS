@@ -41,17 +41,27 @@ class DensityMesh:
     recon_args: dict
         Reconstruction arguments - 'f', 'bias', 'los' (only required for box), 'engine' and 'smoothing radius'.
 
+    init_sm_frac: float, default=0.45
+        Inititial spherical smoothing for galaxies and randoms on mesh.
+
+    boxsize: list, default=None
+        Size of simulation box (only required when self.box_like=True). If None, estimated from galaxy/random positions.
+
+    boxcenter: list, default=None
+        Center coordinates of simulation box (only required when self.box_like=True). If None, estimated from galaxy/random positions.
+
     kwargs : dict
         Optional arguments.
     """
 
     def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, 
                  data_cols=None, dtype='f4', threads=None, reconstruct=None, recon_args=None, 
-                 boxsize=None, boxcenter=None, **kwargs):
+                 init_sm_frac=0.45, boxsize=None, boxcenter=None, **kwargs):
 
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
         logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
+        self.init_sm_frac = init_sm_frac
         self.dtype = dtype
         self.threads = os.cpu_count() if threads is None else 8
         logger.debug(f'Data type: {self.dtype}, Threads: {self.threads}')
@@ -188,7 +198,7 @@ class DensityMesh:
 
         return mesh
 
-    def _set_mesh_density(self, mesh, init_sm_frac=0.45, threshold_randoms=0.01, use_wisdom=False):
+    def _set_mesh_density(self, mesh, threshold_randoms=0.01, use_wisdom=False):
         r"""
         Populate mesh with galaxies and randoms
 
@@ -197,8 +207,6 @@ class DensityMesh:
         mesh: pyrecon.recon.BaseReconstruction object
             Input density mesh.
             
-        init_sm_frac: float, default=0.45
-            Inititial spherical smoothing for galaxies and randoms on mesh.
         """
 
         # assign data
@@ -206,7 +214,7 @@ class DensityMesh:
         # assign randoms
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
-        r_smooth = init_sm_frac * self.r_sep
+        r_smooth = self.init_sm_frac * self.r_sep
         logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(r_smooth))
         mesh.mesh_delta = mesh.mesh_data.copy()
         mesh.mesh_delta.value = tophat_smoothing(mesh.mesh_data, 
@@ -326,7 +334,7 @@ class DensityMesh:
         logger.setLevel(old_level)
 
         
-    def create_mesh(self, boxpad=1.1, cellsize=4., init_sm_frac=0.45, save_mesh=None, use_wisdom=False, **kwargs):
+    def create_mesh(self, boxpad=1.1, cellsize=4., save_mesh=None, use_wisdom=False, **kwargs):
         r"""
         Create the density mesh
 
@@ -337,9 +345,6 @@ class DensityMesh:
 
         cellsize: float, default=4.
             Size of mesh cells. 
-
-        init_sm_frac: float, default=0.45
-            Inititial spherical smoothing for galaxies and randoms on mesh.
 
         ran_min : float, default=0.01
             Minimum fraction of average randoms for cell to be counted as part of survey.

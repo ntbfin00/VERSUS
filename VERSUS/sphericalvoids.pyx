@@ -86,7 +86,7 @@ cdef class SphericalVoids:
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
                  reconstruct=None, recon_args=None, delta_mesh=None, mesh_args=None, 
-                 dtype='f4', boxsize=None, boxcenter=None, use_wisdom=False, **kwargs):
+                 dtype='f4', boxsize=None, boxcenter=None, init_sm_frac=0.45, use_wisdom=False, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
                       'data_positions', 'random_positions', 'data_weights', 'random_weights']
@@ -99,7 +99,7 @@ cdef class SphericalVoids:
             delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                      random_positions=random_positions, random_weights=random_weights, 
                                      data_cols=data_cols, reconstruct=reconstruct, recon_args=recon_args,
-                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter)
+                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter, init_sm_frac=init_sm_frac)
             delta_mesh.create_mesh(use_wisdom=self.use_wisdom, **kwargs)
             for name in properties:
                 if name.endswith('_positions'):
@@ -172,8 +172,6 @@ cdef class SphericalVoids:
         r"""
         Determine the detection limit for spurious voids for the given tracer sample using an empirical formula. At smaller radii, spurious voids may contaminate the output void sample.
 
-        Parameters
-        ----------
         """
 
         if sign == 1:
@@ -185,6 +183,10 @@ cdef class SphericalVoids:
         return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
 
     def _smoothing(self, float radius):
+        r"""
+        Smooth density field with a tophat filter at a given radius.
+
+        """
 
         (
           delta_sm,
@@ -217,7 +219,10 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def check_real_space(self, float sign):
+    def resize_voids(self, float sign):
+        """
+        Resize voids according to new interior densities calculated directly from the galaxy and random positions.
+        """
         cdef int p, q, N_tot
         cdef float fact, delta_enc
         cdef int[::1] Nvoids 
@@ -242,8 +247,10 @@ cdef class SphericalVoids:
         new_radius = np.zeros_like(self.radius)
         Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
         N_tot = 0
+        # loop through void positions
         for p in range(self.position.shape[0]):
             pos = self.position[p]
+            # loop through input radii bins
             for q in range(self.input_radii.size):
                 R = self.Radii[q]
 
@@ -257,6 +264,7 @@ cdef class SphericalVoids:
                 delta_enc *= inv_rho_mean 
                 delta_enc -= 1
 
+                # if void passes density threshold, assign to new radius bin
                 if sign * delta_enc < void_delta:
                     new_position[N_tot] = pos
                     new_radius[N_tot] = R
@@ -265,8 +273,8 @@ cdef class SphericalVoids:
                     break
 
         self.position = new_position[:N_tot]
-        self.radius = new_radius[:N_tot]
-        self.counts = np.asarray(Nvoids)
+        self.radius   = new_radius[:N_tot]
+        self.counts   = np.asarray(Nvoids)
 
 
     def _sort_radii(self, float[:] radii):
@@ -276,8 +284,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, 
-                        float init_sm_frac=0.45, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -292,9 +299,6 @@ cdef class SphericalVoids:
 
         void_overlap: float, default=False
             Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
-
-        init_sm_frac: float, default=0.45
-            Inititial spherical smoothing for galaxies and randoms on mesh.
 
         threads: int, default=8
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
@@ -397,7 +401,7 @@ cdef class SphericalVoids:
             num_voids_around2 = VL.num_voids_around2_wrap
             mark_void_region  = VL.mark_void_region_wrap
         else:
-            logger.debug("Using VF algorithms with boundary conditions")
+            logger.debug("Using VF algorithms without wrapping")
             num_voids_around1 = VL.num_voids_around1
             num_voids_around2 = VL.num_voids_around2
             mark_void_region  = VL.mark_void_region
@@ -504,13 +508,13 @@ cdef class SphericalVoids:
         pos              = np.asarray(void_pos[:total_voids_found], dtype=np.float32)  # void positions on mesh
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.radius      = np.asarray(void_rad[:total_voids_found]) * cellsize
-        self.counts       = np.asarray(Nvoids)
+        self.counts      = np.asarray(Nvoids)
 
-        # post-process voids by counting enclosed galaxies
+        # post-process voids by counting enclosed galaxies (and randoms)
         if self.data_tree is None:
             logger.warning("self.data_tree (scipy.spatial.cKDTree object of positions) has not been provided to determine void sizes directly from galaxy positions. Output may be subject to discreteness effects.")
         else:
-            self.check_real_space(sign)
+            self.resize_voids(sign)
 
         self.position += self.box_shift
 
@@ -523,6 +527,8 @@ cdef class SphericalVoids:
             vsf[2,i] = np.sqrt(self.counts[i+1]) * norm  # poisson uncertainty
 
         self.size_function = np.asarray(vsf) 
+
+
 
 
     def plot_size_function(self, dndlnr=True, poisson_err=True, log=False,

@@ -60,8 +60,9 @@ def FFT3Dr(
             fft_out = pyfftw.empty_aligned((nx, ny, nz // 2 + 1),
                                            dtype="complex64")
         else:
+            nz = (nz - 1) * 2
             fft_in = pyfftw.empty_aligned(delta.shape, dtype="complex64")
-            fft_out = pyfftw.empty_aligned((nx, ny, (nz - 1) * 2),
+            fft_out = pyfftw.empty_aligned((nx, ny, nz),
                                            dtype="float32")
 
         # load wisdom

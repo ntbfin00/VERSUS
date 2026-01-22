@@ -5,8 +5,7 @@ import logging
 from VERSUS import setup_logging, SphericalVoids
 
 setup_logging(level=logging.INFO)
-logger = logging.getLogger("VERSUS")
-
+logger = logging.getLogger("VERSUS") 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run spherical void-finding on simulated or survey data")
     parser.add_argument('--data', help="Array or path to data positions")
@@ -85,13 +84,13 @@ def main():
         save_mesh = args.mesh
 
     # initialise void finder with command-line arguments
-    VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights,                                                                                           random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
+    VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights, init_sm_frac=args.smoothing,
+                        random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
                         delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
                         cellsize=args.cellsize, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
-    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, 
-                       init_sm_frac=args.smoothing, threads=args.threads)
+    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
 
     # save void output to file
     fn = "output/" if args.save_fn is None else args.save_fn
