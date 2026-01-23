@@ -227,10 +227,9 @@ cdef class SphericalVoids:
         cdef float fact#, delta_enc
         cdef int[::1] Nvoids 
 
-        ###########
-        # cdef int[:,::1] void_pos
-        # cdef float[::1] void_rad 
-        # cdef long total_voids_found=0
+        cdef int[:,::1] new_position 
+        cdef float[::1] new_radius 
+        cdef long voids_found=0, total_voids_found=0
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
@@ -265,14 +264,9 @@ cdef class SphericalVoids:
         )
         del self.data_tree
 
-        new_position = np.zeros_like(self.position)
+        new_position = np.zeros_like(self.position, dtype=np.int32) #### CHANGE
         new_radius = np.zeros_like(self.radius)
         Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
-
-        #### ADD OVERLAP CONDITION
-        # void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
-        # void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
-
 
         # mask detected void cells
         available = np.ones(pos_grid.shape[0], dtype=bool)
@@ -300,40 +294,37 @@ cdef class SphericalVoids:
             new_voids &= available
             # delta_min = delta_enc.min(axis=1, where=available)  # accounts for overlap with larger radii
             # new_voids = sign * delta_min < void_delta
+            delta_min = delta_enc[new_voids].min(axis=1)
+            indx = delta_enc[new_voids].argmin(axis=1)
+            void_id = np.argsort(delta_min)
+
 
             # account for overlap with same radii
-            # for i in range(self.position[0]):
-                # delta_enc.min(axis=1, where=available) # (Nvoids)
-                # cand_pos = pos_grid[np.where(delta_enc == delta_enc.min(axis=1, where=available))]
-                # print(cand_pos)
-                # nearby_voids = num_voids_around1(self.void_overlap, total_voids_found,
-                                                 # int(self.boxsize[0]), int(self.boxsize[1]), int(self.boxsize[2]), 
-                                                 # int(cand_pos[0]), int(cand_pos[1]), int(cand_pos[2]),
-                                                 # &void_rad[0], &void_pos[0,0],
-                                                 # R, 4)
+            num_voids_around1 = VL.num_voids_around1_wrap
+            voids_found = 0
+            for (n, ID) in enumerate(void_id):
+                cand_pos = pos_grid[new_voids][ID, indx[n]]
+                nearby_voids = num_voids_around1(self.void_overlap, total_voids_found,
+                                                 int(self.boxsize[0]), int(self.boxsize[1]), int(self.boxsize[2]), 
+                                                 int(cand_pos[0]), int(cand_pos[1]), int(cand_pos[2]),
+                                                 &new_radius[0], &new_position[0,0],
+                                                 R, 4)
 
-                # if nearby_voids == 0:
-                    # void_pos[total_voids_found] = cand_pos
-                    # void_rad[total_voids_found] = R_grid
-                    # total_voids_found += 1
+                if nearby_voids == 0:
+                    new_position[total_voids_found, 0] = cand_pos[0]
+                    new_position[total_voids_found, 1] = cand_pos[1]
+                    new_position[total_voids_found, 2] = cand_pos[2]
+                    new_radius[total_voids_found] = R
+                    voids_found += 1
+                    total_voids_found += 1
 
-                    # # mark potential void positions as occupied
-                    # available[new_voids] = False
-                    # available[
+                    # mark potential void positions as occupied
+                    available[new_voids][ID] = False
 
-            indx = delta_enc.argmin(axis=1)[new_voids]
-            # indx = delta_enc[new_voids].argmin(axis=1)
-            new_position[new_voids] = pos_grid[new_voids, indx]
-            new_radius[new_voids] = R
-            Nvoids[q] += new_voids.sum()
-            available[new_voids] = False
+            Nvoids[q] = voids_found
 
-            # end if all voids have been resized
-            if not available.any(): break
-
-        mask = new_radius > 0
-        self.position = new_position[mask]
-        self.radius   = new_radius[mask]
+        self.position = new_position[:total_voids_found]
+        self.radius   = new_radius[:total_voids_found]
         self.counts   = np.asarray(Nvoids)
 
 
