@@ -224,8 +224,13 @@ cdef class SphericalVoids:
         Resize voids according to new interior densities calculated directly from the galaxy and random positions.
         """
         cdef int p, q, N_tot
-        cdef float fact, delta_enc
+        cdef float fact#, delta_enc
         cdef int[::1] Nvoids 
+
+        ###########
+        # cdef int[:,::1] void_pos
+        # cdef float[::1] void_rad 
+        # cdef long total_voids_found=0
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
 
@@ -243,37 +248,92 @@ cdef class SphericalVoids:
             rand_w = np.ones(self.random_tree.n) if self.random_weights is None else self.random_weights
             inv_rho_mean = rand_w.sum() / data_w.sum()
 
+        # create grid of potential new positions around void center
+        dx = self.r_sep / 2
+        offsets = np.arange(-self.r_sep + dx, self.r_sep, dx)
+        grid = np.stack(np.meshgrid(offsets, offsets, offsets, indexing="ij"), -1).reshape(-1, 3)
+        pos_grid = self.position[:, None, :] + grid[None, :, :]
+
+        # determine number of enclosed galaxies
+        Rmax = self.input_radii[0]
+        n_max = int(1.5 * (Rmax / self.r_sep)**3)
+        particle_dist, particle_id = self.data_tree.query(
+            pos_grid,
+            k=n_max,
+            distance_upper_bound=Rmax,
+            workers=self.threads,
+        )
+        del self.data_tree
+
         new_position = np.zeros_like(self.position)
         new_radius = np.zeros_like(self.radius)
         Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
-        N_tot = 0
-        # loop through void positions
-        for p in range(self.position.shape[0]):
-            pos = self.position[p]
-            # loop through input radii bins
-            for q in range(self.input_radii.size):
-                R = self.Radii[q]
 
-                delta_enc = data_w[self.data_tree.query_ball_point(pos, R, workers=self.threads)].sum()
-                if self.box_like: 
-                    delta_enc /= R**3
-                else:
-                    rand_count = rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum()
-                    if rand_count == 0: break
-                    delta_enc /= rand_count
-                delta_enc *= inv_rho_mean 
-                delta_enc -= 1
+        #### ADD OVERLAP CONDITION
+        # void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
+        # void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
 
-                # if void passes density threshold, assign to new radius bin
-                if sign * delta_enc < void_delta:
-                    new_position[N_tot] = pos
-                    new_radius[N_tot] = R
-                    Nvoids[q] += 1
-                    N_tot += 1
-                    break
 
-        self.position = new_position[:N_tot]
-        self.radius   = new_radius[:N_tot]
+        # mask detected void cells
+        available = np.ones(pos_grid.shape[0], dtype=bool)
+        # available = np.ones(pos_grid.shape[:2], dtype=bool)
+
+        # loop over input radii
+        for q, R in enumerate(self.input_radii):
+            mask = particle_dist < R
+
+            weights = np.zeros_like(particle_dist, dtype=data_w.dtype)
+            weights[mask] = data_w[particle_id[mask]]
+            delta_enc = (weights * mask).sum(axis=2)
+
+            if self.box_like: 
+                delta_enc /= R**3
+            # else:
+                # rand_count = rand_w[self.random_tree.query_ball_point(pos, R, workers=self.threads)].sum() #### change
+                # if rand_count == 0: break
+                # delta_enc /= rand_count
+            delta_enc *= inv_rho_mean 
+            delta_enc -= 1
+
+            # if void passes density threshold, assign to new radius bin
+            new_voids = sign * delta_enc.min(axis=1) < void_delta
+            new_voids &= available
+            # delta_min = delta_enc.min(axis=1, where=available)  # accounts for overlap with larger radii
+            # new_voids = sign * delta_min < void_delta
+
+            # account for overlap with same radii
+            # for i in range(self.position[0]):
+                # delta_enc.min(axis=1, where=available) # (Nvoids)
+                # cand_pos = pos_grid[np.where(delta_enc == delta_enc.min(axis=1, where=available))]
+                # print(cand_pos)
+                # nearby_voids = num_voids_around1(self.void_overlap, total_voids_found,
+                                                 # int(self.boxsize[0]), int(self.boxsize[1]), int(self.boxsize[2]), 
+                                                 # int(cand_pos[0]), int(cand_pos[1]), int(cand_pos[2]),
+                                                 # &void_rad[0], &void_pos[0,0],
+                                                 # R, 4)
+
+                # if nearby_voids == 0:
+                    # void_pos[total_voids_found] = cand_pos
+                    # void_rad[total_voids_found] = R_grid
+                    # total_voids_found += 1
+
+                    # # mark potential void positions as occupied
+                    # available[new_voids] = False
+                    # available[
+
+            indx = delta_enc.argmin(axis=1)[new_voids]
+            # indx = delta_enc[new_voids].argmin(axis=1)
+            new_position[new_voids] = pos_grid[new_voids, indx]
+            new_radius[new_voids] = R
+            Nvoids[q] += new_voids.sum()
+            available[new_voids] = False
+
+            # end if all voids have been resized
+            if not available.any(): break
+
+        mask = new_radius > 0
+        self.position = new_position[mask]
+        self.radius   = new_radius[mask]
         self.counts   = np.asarray(Nvoids)
 
 
@@ -315,7 +375,7 @@ cdef class SphericalVoids:
         cdef long[::1] IDs
         cdef int i, j, k, p, q, xdim, ydim, zdim, yzdim, mode
         cdef int[::1] Nvoids
-        cdef double void_cell_fraction, void_volume_fraction=0.0
+        cdef double void_cell_fraction=0.0, void_volume_fraction=0.0
         cdef float[:,::1] position
         cdef int[:,::1] void_pos
         cdef float[::1] delta_v, void_rad, box_shift
