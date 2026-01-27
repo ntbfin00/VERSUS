@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
     parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
     parser.add_argument('--smoothing', type=float, default=0.45, help="Radius (as fraction of galaxy separation) to initally smooth density field.")
+    parser.add_argument('--no_resizing', required=False, action='store_true', help="No void radius resizing to match unsmoothed field.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=8, 
                         help="Number of threads used for multi-threaded processes. if set to zero, defaults to number of available CPUs.")
@@ -90,7 +91,8 @@ def main():
                         cellsize=args.cellsize, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
-    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, threads=args.threads)
+    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, 
+                       void_resizing=not args.no_resizing, threads=args.threads)
 
     # save void output to file
     fn = "output/" if args.save_fn is None else args.save_fn

@@ -157,7 +157,7 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
 	      else 
 		{
 		  dist2 = l*l + m*m + n*n;
-		  if (dist2<R_grid2)
+		  if (dist2<=R_grid2)
 		    {
 		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
 #pragma omp atomic
@@ -205,7 +205,7 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
 	      else 
 		{
 		  dist2 = l*l + m*m + n*n;
-		  if (dist2<R_grid2)
+		  if (dist2<=R_grid2)
 		    {
 		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
 #pragma omp atomic
@@ -251,7 +251,7 @@ void mark_void_region_wrap(long *in_void, int Ncells, int xdim, int ydim, int zd
 	      if (k1<0)     k1 = k1+zdim;
 
 	      dist2 = l*l + m*m + n*n;
-	      if (dist2<R_grid2)
+	      if (dist2<=R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
 		  in_void[number] += 1;
@@ -283,7 +283,7 @@ void mark_void_region(long *in_void, int Ncells, int xdim, int ydim, int zdim,
 	      k1 = k+n;
 
 	      dist2 = l*l + m*m + n*n;
-	      if (dist2<R_grid2)
+	      if (dist2<=R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
 		  in_void[number] += 1;

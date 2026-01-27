@@ -124,7 +124,7 @@ cdef class SphericalVoids:
             else:
                 if mesh_args is None or not all([arg in mesh_args for arg in properties[:5]]):
                     raise Exception(f'{properties[:5]} must be provided in addition to delta mesh with mesh_args.')
-                logger.warning("data_tree (and random_tree) attributes must be provided along with data_weights (and random_weights) in order to mitigate discretness effects. Otherwise output will match Pylians")
+                logger.warning("data_tree (and random_tree) attributes must be provided along with data_weights (and random_weights) in order to resize voids. Otherwise output will match Pylians")
                 for name in properties:
                     if name in properties[:5]:
                         setattr(self, name, mesh_args[name])
@@ -142,12 +142,6 @@ cdef class SphericalVoids:
         self.box_shift = np.asarray(self.boxcenter, dtype=np.float32) - np.asarray(self.boxsize, dtype=np.float32)/2 
         logger.debug(f"Mesh data type: {self.delta.dtype}")
 
-        if self.data_tree is not None:
-            logger.info('Building k-d trees')
-            self.data_tree = cKDTree((self.data_tree - self.box_shift) % self.boxsize, compact_nodes=False, 
-                                     balanced_tree=False, boxsize=self.boxsize if self.box_like else None)
-            self.random_tree = None if self.box_like else cKDTree((self.random_tree - self.box_shift) % self.boxsize, 
-                                                                  compact_nodes=False, balanced_tree=False)
 
     def load_mesh(self, mesh_fn):
         r"""
@@ -221,13 +215,18 @@ cdef class SphericalVoids:
     @cython.wraparound(False)
     def resize_voids(self, float sign):
         """
-        Resize voids according to new interior densities calculated directly from the galaxy and random positions.
+        Resize voids found on smoothed field to match unsmoothed field according to interior densities calculated directly from the galaxy and random positions.
         """
         cdef int p, q, N_tot
         cdef float fact, delta_enc
         cdef int[::1] Nvoids 
 
         logger.info("Postprocessing catalogues directly using galaxy positions.")
+
+        self.data_tree = cKDTree((self.data_tree - self.box_shift) % self.boxsize, compact_nodes=False, 
+                                 balanced_tree=False, boxsize=self.boxsize if self.box_like else None)
+        self.random_tree = None if self.box_like else cKDTree((self.random_tree - self.box_shift) % self.boxsize, 
+                                                              compact_nodes=False, balanced_tree=False)
 
         # ensure correct expression for clusters
         void_delta = sign * self.void_delta
@@ -284,7 +283,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, void_resizing=True, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -323,6 +322,9 @@ cdef class SphericalVoids:
         cdef long local_voids
         cdef long[::1] indexes, IDs_temp
 
+        if void_resizing and self.data_tree is None:
+            raise Exception("Galaxy positions (random positions) must be provided as self.data_tree (self.random_tree) for voids to be resized to match output of unsmoothed field.")
+
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
         cellsize = np.mean(self.cellsize)
@@ -345,7 +347,7 @@ cdef class SphericalVoids:
             logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
             # ensure extra bin for void resizing
-            if self.data_tree is not None:
+            if void_resizing:
                 Radii = np.append(Radii, Radii.min() - 2).astype(np.float32)
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
@@ -511,9 +513,7 @@ cdef class SphericalVoids:
         self.counts      = np.asarray(Nvoids)
 
         # post-process voids by counting enclosed galaxies (and randoms)
-        if self.data_tree is None:
-            logger.warning("self.data_tree (scipy.spatial.cKDTree object of positions) has not been provided to determine void sizes directly from galaxy positions. Output may be subject to discreteness effects.")
-        else:
+        if void_resizing:
             self.resize_voids(sign)
 
         self.position += self.box_shift
