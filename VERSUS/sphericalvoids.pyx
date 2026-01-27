@@ -249,7 +249,9 @@ cdef class SphericalVoids:
 
         # create grid of potential new positions around void center
         dx = self.r_sep / 2
-        offsets = np.arange(-self.r_sep + dx, self.r_sep, dx)
+        # offsets = np.arange(-dx, 2*dx, dx)
+        offsets = np.arange(-dx, dx, dx) + dx / 2
+        # offsets = np.array([0.])
         grid = np.stack(np.meshgrid(offsets, offsets, offsets, indexing="ij"), -1).reshape(-1, 3)
         pos_grid = self.position[:, None, :] + grid[None, :, :]
 
@@ -279,6 +281,9 @@ cdef class SphericalVoids:
             weights = np.zeros_like(particle_dist, dtype=data_w.dtype)
             weights[mask] = data_w[particle_id[mask]]
             delta_enc = (weights * mask).sum(axis=2)
+            sort = np.argsort(delta_enc, axis=1)
+            delta_enc = np.take_along_axis(delta_enc, sort, axis=1)
+            pos_grid_sorted = np.take_along_axis(pos_grid, sort[..., None], axis=1)
 
             if self.box_like: 
                 delta_enc /= R**3
@@ -289,37 +294,41 @@ cdef class SphericalVoids:
             delta_enc *= inv_rho_mean 
             delta_enc -= 1
 
-            # if void passes density threshold, assign to new radius bin
-            new_voids = sign * delta_enc.min(axis=1) < void_delta
+            # determine which voids pass density threshold at R
+            # new_voids = sign * delta_enc.min(axis=1) < void_delta
+            new_voids = sign * delta_enc[:,0] < void_delta
             new_voids &= available
-            # delta_min = delta_enc.min(axis=1, where=available)  # accounts for overlap with larger radii
-            # new_voids = sign * delta_min < void_delta
             delta_min = delta_enc[new_voids].min(axis=1)
-            indx = delta_enc[new_voids].argmin(axis=1)
-            void_id = np.argsort(delta_min)
+            sort = np.argsort(delta_min)
+            indx = delta_enc[new_voids].argmin(axis=1)[sort]
+            void_id = np.flatnonzero(new_voids)[sort]
 
-
-            # account for overlap with same radii
-            num_voids_around1 = VL.num_voids_around1_wrap
+            num_voids_around1 = VL.num_voids_around1_wrap #### CHANGE
             voids_found = 0
-            for (n, ID) in enumerate(void_id):
-                cand_pos = pos_grid[new_voids][ID, indx[n]]
-                nearby_voids = num_voids_around1(self.void_overlap, total_voids_found,
-                                                 int(self.boxsize[0]), int(self.boxsize[1]), int(self.boxsize[2]), 
-                                                 int(cand_pos[0]), int(cand_pos[1]), int(cand_pos[2]),
-                                                 &new_radius[0], &new_position[0,0],
-                                                 R, 4)
+            # loop over voids that pass threshold cut (sorted by delta)
+            # for (n, ID) in enumerate(void_id):
+                # cand_pos = pos_grid[ID, indx[n]]
+            for ID in void_id:
+                for n in range(pos_grid.shape[1]):
+                    if delta_enc[ID, n] > void_delta: break  # can make this explicit in new_voids?
+                    cand_pos = pos_grid_sorted[ID, n]
+                    nearby_voids = num_voids_around1(self.void_overlap, total_voids_found,
+                                                     int(self.boxsize[0]), int(self.boxsize[1]), int(self.boxsize[2]), 
+                                                     int(cand_pos[0]), int(cand_pos[1]), int(cand_pos[2]),
+                                                     &new_radius[0], &new_position[0,0],
+                                                     R, 4)
 
-                if nearby_voids == 0:
-                    new_position[total_voids_found, 0] = cand_pos[0]
-                    new_position[total_voids_found, 1] = cand_pos[1]
-                    new_position[total_voids_found, 2] = cand_pos[2]
-                    new_radius[total_voids_found] = R
-                    voids_found += 1
-                    total_voids_found += 1
+                    if nearby_voids == 0:
+                        new_position[total_voids_found, 0] = cand_pos[0]
+                        new_position[total_voids_found, 1] = cand_pos[1]
+                        new_position[total_voids_found, 2] = cand_pos[2]
+                        new_radius[total_voids_found] = R
+                        voids_found += 1
+                        total_voids_found += 1
 
-                    # mark potential void positions as occupied
-                    available[new_voids][ID] = False
+                        # mark potential void positions as occupied
+                        available[ID] = False
+                        break 
 
             Nvoids[q] = voids_found
 
