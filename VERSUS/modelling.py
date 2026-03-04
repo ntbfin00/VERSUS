@@ -23,6 +23,18 @@ class SizeBias:
     def fit_profile(self, Rmax=4, nbins=100, rbins=5, rescale=True):
         r"""
         Fit the rescaled (r / R) void density profile (in units of rho / rho_mean)
+
+        Parameters
+        ----------
+
+        Rmax: float, default=4
+            Maximum radius (in units of void radius) to fit the density profile.
+        nbins: int, default=100
+            Number of bins used to measure density profile.
+        rbins: int, default=5
+            Number of radius bins in which to average the density profile. Used to account for profile evolution.
+        rescale: bool, default=True
+            Perform rescaling of density profile to ensure density threshold is crossed at detected radius. Not required if true density profile is known.
         """
 
         self.r = np.linspace(0, Rmax, nbins)
@@ -54,13 +66,13 @@ class SizeBias:
             self.r = self.r[None, :] / self.r[indx][:, None]
             splines = [
                     Interpolate(np.insert(self.r[i], 0, 0.), 
-                                np.insert(self.profile[i], 0, 1 + self.void_delta)) 
+                                np.insert(self.profile[i], 0, 0.)) 
                     for i in range(self.r.shape[0])
                     ]
             self.fit = lambda r : np.array([spl(r) for spl in splines])
         else:
             self.fit = Interpolate(np.insert(self.r, 0, 0.), 
-                                   np.insert(self.profile, 0, 1 + self.void_delta, axis=1), 
+                                   np.insert(self.profile, 0, 0., axis=1), 
                                    axis=1)
 
 
