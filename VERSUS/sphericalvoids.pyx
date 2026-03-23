@@ -17,10 +17,10 @@ cdef class SphericalVoids:
 
     Parameters
     ----------
-    data_positions: array (N), Path
+    data_positions: array (N,3), Path
         Array of data positions (in cartesian or sky coordinates) or path to such positions.
 
-    data_weights: array (N,3), default=None
+    data_weights: array (N), default=None
         Array of data weights.
 
     random_positions: array (N,3), Path
@@ -124,7 +124,6 @@ cdef class SphericalVoids:
             else:
                 if mesh_args is None or not all([arg in mesh_args for arg in properties[:5]]):
                     raise Exception(f'{properties[:5]} must be provided in addition to delta mesh with mesh_args.')
-                logger.warning("data_tree (and random_tree) attributes must be provided along with data_weights (and random_weights) in order to resize voids. Otherwise output will match Pylians")
                 for name in properties:
                     if name in properties[:5]:
                         setattr(self, name, mesh_args[name])
@@ -215,7 +214,7 @@ cdef class SphericalVoids:
     @cython.wraparound(False)
     def resize_voids(self, float sign):
         """
-        Resize voids found on smoothed field to match unsmoothed field according to interior densities calculated directly from the galaxy and random positions.
+        Resize voids found on smoothed field with FFTs according to interior densities calculated directly from the galaxy and random positions.
         """
         cdef int p, q, N_tot
         cdef float fact, delta_enc
@@ -283,7 +282,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, void_resizing=True, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, config_space_resizing=False, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -298,6 +297,8 @@ cdef class SphericalVoids:
 
         void_overlap: float, default=False
             Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
+        config_space_resizing: bool, default=False
+            Resize the voids using their positions. Useful for checking FFT smoothing result.
 
         threads: int, default=8
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
@@ -322,8 +323,8 @@ cdef class SphericalVoids:
         cdef long local_voids
         cdef long[::1] indexes, IDs_temp
 
-        if void_resizing and self.data_tree is None:
-            raise Exception("Galaxy positions (random positions) must be provided as self.data_tree (self.random_tree) for voids to be resized to match output of unsmoothed field.")
+        if config_space_resizing and self.data_tree is None:
+            raise Exception("Galaxy positions (random positions) must be provided as self.data_tree (self.random_tree) for configuration space resizing.")
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
@@ -342,12 +343,13 @@ cdef class SphericalVoids:
         Rspurious = self.rmin_spurious(sign)
         # set default radii if not provided
         if radii[0] == 0.:
-            Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
+            # Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
+            Radii = np.exp(np.log(25) + (np.log(60) - np.log(25)) *  np.arange(20) / (20 - 1), dtype=np.float32)[::-1]; 
             self.Radii = Radii[(Radii > cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
             logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
             # ensure extra bin for void resizing
-            if void_resizing:
+            if config_space_resizing:
                 Radii = np.append(Radii, Radii.min() - 2).astype(np.float32)
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
@@ -422,7 +424,7 @@ cdef class SphericalVoids:
                 logger.info(f'No cells with delta {ineq} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
                 continue
 
-            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and asineqing IDs')
+            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and assigning IDs')
             local_voids = 0
             for i in range(xdim):
                 for j in range(ydim):
@@ -513,7 +515,7 @@ cdef class SphericalVoids:
         self.counts      = np.asarray(Nvoids)
 
         # post-process voids by counting enclosed galaxies (and randoms)
-        if void_resizing:
+        if config_space_resizing:
             self.resize_voids(sign)
 
         self.position += self.box_shift

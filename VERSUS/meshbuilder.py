@@ -306,11 +306,6 @@ class DensityMesh:
 
         logger.info(f'Estimating volume and average galaxy separation (Ngal = {self.N_data})')
 
-        # suppress logging outputs for this function
-        old_level = logger.level
-        if logger.getEffectiveLevel() == logging.INFO:
-            logger.setLevel(logging.WARNING)
-
         # create mesh flush with survey volume
         mesh = self._set_mesh(boxpad=1., nmesh=nmesh, bias=1.)
         # first estimate of volume (true if box)
@@ -330,8 +325,7 @@ class DensityMesh:
             self.r_sep = (4 * np.pi * mesh.rho_mean / 3)**(-1/3)
             self.rho_mean = mesh.rho_mean
             
-        logger.debug(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.4f}")
-        logger.setLevel(old_level)
+        logger.info(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.4f}")
 
         
     def create_mesh(self, boxpad=1.1, cellsize=4., save_mesh=None, use_wisdom=False, **kwargs):
