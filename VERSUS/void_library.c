@@ -219,8 +219,10 @@ int num_voids_around2(float void_overlap, long *in_void, float R_grid2, float ce
 }
 
 
-void mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
-                           int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
+// This routine marks surrounding cells belonging to void with a void ID and accounts for void merging.
+// Returns the void ID.
+int mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
+                          int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1;
   long number, void_id=0;
@@ -270,7 +272,7 @@ void mark_void_region_wrap(float void_merge, long *in_void, long total_voids_fou
 	    }
 	}
     } 
-  return;
+  return total_voids_found;
 
   merge_void:
     for (l=-Ncells; l<=Ncells; l++)
@@ -303,10 +305,11 @@ void mark_void_region_wrap(float void_merge, long *in_void, long total_voids_fou
               }
           }
       } 
+    return void_id;
 }
 
 
-void mark_void_region(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
+int mark_void_region(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
                       int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1;

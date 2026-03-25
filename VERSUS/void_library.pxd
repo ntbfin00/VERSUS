@@ -9,9 +9,9 @@ cdef extern from "void_library.h":
                             float cell_frac, int Ncells, int xdim, int ydim, 
                             int zdim, int yzdim, int i, int j, int k, int threads);
 
-      void mark_void_region(float void_merge, long *in_void, long total_voids_found, 
-                            float R_grid2, float cell_frac, int Ncells, int xdim, 
-                            int ydim, int zdim, int yzdim, int i, int j, int k);
+      int mark_void_region(float void_merge, long *in_void, long total_voids_found, 
+                           float R_grid2, float cell_frac, int Ncells, int xdim, 
+                           int ydim, int zdim, int yzdim, int i, int j, int k);
 
       int num_voids_around1_wrap(float void_overlap, long total_voids_found, 
                                  int xdim, int ydim, int zdim,
@@ -22,6 +22,6 @@ cdef extern from "void_library.h":
                                  float cell_frac, int Ncells, int xdim, int ydim, 
                                  int zdim, int yzdim, int i, int j, int k, int threads);
 
-      void mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, 
-                                 float R_grid2, float cell_frac, int Ncells, int xdim, 
-                                 int ydim, int zdim, int yzdim, int i, int j, int k);
+      int mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, 
+                                float R_grid2, float cell_frac, int Ncells, int xdim, 
+                                int ydim, int zdim, int yzdim, int i, int j, int k);

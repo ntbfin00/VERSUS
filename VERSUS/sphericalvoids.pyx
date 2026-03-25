@@ -315,7 +315,7 @@ cdef class SphericalVoids:
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
         cdef long max_num_voids, voids_found, total_voids_found, ID
-        cdef float vol_mesh, vol_void, norm
+        cdef float vol_cell, vol_mesh, vol_void, norm
         cdef float[:,:,::1] delta_sm
         cdef long[:,:,::1] in_void
         cdef long[::1] IDs
@@ -391,7 +391,8 @@ cdef class SphericalVoids:
             # logger.warning(f"Radii are binned more finely than cellsize {self.cellsize:.1f}. May induce bin-to-bin correlations.")
 
         # determine mesh volume
-        vol_mesh = np.prod(self.cellsize) * nmesh_tot
+        vol_cell = np.prod(self.cellsize)
+        vol_mesh = vol_cell * nmesh_tot
         # determine non-overlapping volume of smallest void
         vol_void = (1 - self.void_overlap) * 4 * np.pi * Rmin**3 / 3
         # determine maximum possible number of voids
@@ -400,8 +401,9 @@ cdef class SphericalVoids:
         logger.debug(f"Maximum number of voids = {max_num_voids:d}")
 
         # define arrays containing void positions and radii
-        void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
-        void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
+        void_pos = np.zeros((max_num_voids, 3), dtype=np.int32)
+        void_rad = np.zeros(max_num_voids,      dtype=np.float32)
+        void_id  = np.zeros(max_num_voids,      dtype=np.float32)
         Nvoids = np.zeros(bins,   dtype=np.int32)
 
         # define the in_void and delta_v array
@@ -466,7 +468,7 @@ cdef class SphericalVoids:
             voids_found = 0 
 
             # select method to identify nearby voids based on radius
-            mode = 0 if total_voids_found < (2*Ncells+1)**3 else 1
+            mode = 0 if total_voids_found < (2*Ncells+1)**3.0 else 1
             threads2 = 1 if Ncells<12 else min(4, self.threads)  # empirically this seems to be the best
             logger.debug(f'Setting threads2 = {threads2} (threads={self.threads})')
             if not void_overlap: logger.debug(f'Identifying nearby voids using mode {mode}')
@@ -492,8 +494,9 @@ cdef class SphericalVoids:
                                                          R_grid, threads2)
                     else:
                         # detect nearby voids using cell searching
-                        nearby_voids = num_voids_around2(self.void_overlap, &in_void[0,0,0], R_grid2, cell_frac, 
-                                                         Ncells, xdim, ydim, zdim, yzdim, i, j, k, threads2)
+                        nearby_voids = num_voids_around2(self.void_overlap, &in_void[0,0,0], 
+                                                         R_grid2, cell_frac, Ncells, xdim, ydim, 
+                                                         zdim, yzdim, i, j, k, threads2)
 
                 # if new void detected
                 if nearby_voids == 0:
@@ -502,16 +505,17 @@ cdef class SphericalVoids:
                     void_pos[total_voids_found, 2] = k
                     void_rad[total_voids_found] = R_grid
 
+                    void_id[total_voids_found] = mark_void_region(void_merge, &in_void[0,0,0], 
+                                                                  total_voids_found + 1, R_grid2, 
+                                                                  cell_frac, Ncells, xdim, ydim, 
+                                                                  zdim, yzdim, i, j, k)
                     voids_found += 1; total_voids_found += 1
-
-                    mark_void_region(void_merge, &in_void[0,0,0], total_voids_found, R_grid2, 
-                                     cell_frac, Ncells, xdim, ydim, zdim, yzdim, i, j, k)
 
             logger.info(f'Found {voids_found} {self.vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
             void_cell_fraction = np.sum(np.asarray(in_void) > 0, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
-            void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
+            void_volume_fraction += voids_found * 4.0 * np.pi * R**3.0 / (3.0 * vol_mesh) # volume determined using void radii
             logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f} without overlap)'.format(void_cell_fraction, void_volume_fraction))
 
         logger.info(f'{total_voids_found} total {self.vf_type}s found.')
@@ -525,7 +529,22 @@ cdef class SphericalVoids:
         self.counts      = np.asarray(Nvoids)
         self.cell_membership = np.asarray(in_void)
 
-        # post-process voids by counting enclosed galaxies (and randoms)
+        # determine radii of merged voids
+        if void_merge:
+            logger.info('Determining radii of merged voids')
+            parent_id, parent_index, Nchild = np.unique(void_id[:total_voids_found], 
+                                                        return_index=True, return_counts=True)
+            parent_ncells = np.unique(self.cell_membership[self.cell_membership>0], return_counts=True)[1]
+
+            # estimate radius from volume of cell members
+            rad_merged = np.cbrt(parent_ncells * vol_cell * 3 / 4 / np.pi)
+            self.radius = self.radius[parent_index]
+            merged = Nchild > 1
+            self.radius[merged] = rad_merged[merged]
+            self.position = self.position[parent_index]
+            self.counts = np.histogram(self.radius, bins=np.insert(self.Radii, 0, np.inf)[::-1])[0][::-1]
+
+        # optionally post-process voids by counting enclosed galaxies (and randoms)
         if config_space_resizing:
             self.resize_voids(sign)
 
