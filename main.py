@@ -23,7 +23,8 @@ def parse_args():
     parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide dictionary of cellsize, r_sep, boxsize, boxcenter and box-like.")
     parser.add_argument('--radii', default=[0.], nargs='+', help="List of void radii to detect. Can be passed as dictionary of arguments to np.linspace or np.arange, e.g. \"{'start': 20, 'stop': 50, 'num (or step)': 10}\"")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
-    parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
+    parser.add_argument('--void_overlap', default=True, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
+    parser.add_argument('--void_merge', default=0.9, help="Boolean or maximum fraction of non-overlapping region to be considered for merging. True merges all overlapping voids while False prevents merging.")
     parser.add_argument('--smoothing', type=float, default=0.45, help="Radius (as fraction of galaxy separation) to initally smooth density field.")
     parser.add_argument('--cs_resizing', required=False, action='store_true', help="Resize voids in configuration space directly using galaxy positions.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
@@ -60,6 +61,13 @@ def parse_args():
     else:
         args.void_overlap = float(args.void_overlap)
 
+    if args.void_merge in [True, 'True', 'true']:
+        args.void_merge = True
+    elif args.void_merge in [False, 'False', 'false']:
+        args.void_merge = False
+    else:
+        args.void_merge = float(args.void_merge)
+
     return args
 
 
@@ -91,7 +99,8 @@ def main():
                         cellsize=args.cellsize, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
-    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, 
+    VF.run_voidfinding(args.radii, void_delta=args.void_delta, 
+                       void_overlap=args.void_overlap, void_merge=args.void_merge, 
                        config_space_resizing=args.cs_resizing, threads=args.threads)
 
     # save void output to file
@@ -102,6 +111,7 @@ def main():
         np.save(fn.format("positions"), VF.position)
         np.save(fn.format("radii"), VF.radius)
         np.save(fn.format("vsf"), VF.size_function)
+        np.save(fn.format("members"), VF.cell_membership)
     else:
         logger.info(f'Output: {dict(zip(VF.input_radii, VF.counts))}')
 

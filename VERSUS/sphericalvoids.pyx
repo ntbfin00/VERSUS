@@ -81,6 +81,7 @@ cdef class SphericalVoids:
     cdef public object radius
     cdef public object counts
     cdef public object size_function
+    cdef public object cell_membership
     cdef object fft_plan, ifft_plan, fft_in, fft_out, ifft_in, ifft_out
     
     def __init__(self, data_positions=None, data_weights=None, 
@@ -282,7 +283,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, config_space_resizing=False, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=8):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -295,8 +296,13 @@ cdef class SphericalVoids:
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
 
-        void_overlap: float, default=False
+        void_overlap: float, default=True
             Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
+
+        void_merge: float, default=0.9
+            Merge threshold for overlapping void. If overlapping region exceeds (1 - void_merge), void is merged.
+            If void_merge=True, always merge overlapping voids; if void_merge=False, never merge overlaps.
+
         config_space_resizing: bool, default=False
             Resize the voids using their positions. Useful for checking FFT smoothing result.
 
@@ -360,6 +366,11 @@ cdef class SphericalVoids:
         if Rmin < Rspurious: logger.warning(f"Spurious {self.vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
+        if void_overlap: 
+            if void_merge:
+                logger.info(f">{(1 - void_merge)*100:.0f}% void overlap required for merging")
+            else:
+                logger.info("No void merging")
         if type(void_overlap) is bool: 
             self.void_overlap = 0.
         else:
@@ -451,6 +462,7 @@ cdef class SphericalVoids:
             # determine void radius in terms of number of mesh cells
             R_grid = R / cellsize; Ncells = <int>R_grid + 1
             R_grid2 = R_grid * R_grid
+            cell_frac = 3 / (4 * np.pi * R_grid * R_grid2)
             voids_found = 0 
 
             # select method to identify nearby voids based on radius
@@ -480,10 +492,8 @@ cdef class SphericalVoids:
                                                          R_grid, threads2)
                     else:
                         # detect nearby voids using cell searching
-                        nearby_voids = num_voids_around2(self.void_overlap, Ncells, i, j, k, 
-                                                         xdim, ydim, zdim, yzdim,
-                                                         R_grid, R_grid2, 
-                                                         &in_void[0,0,0], threads2)
+                        nearby_voids = num_voids_around2(self.void_overlap, &in_void[0,0,0], R_grid2, cell_frac, 
+                                                         Ncells, xdim, ydim, zdim, yzdim, i, j, k, threads2)
 
                 # if new void detected
                 if nearby_voids == 0:
@@ -494,18 +504,18 @@ cdef class SphericalVoids:
 
                     voids_found += 1; total_voids_found += 1
 
-                    mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
-                                     yzdim, R_grid2, i, j, k, threads=1)
+                    mark_void_region(void_merge, &in_void[0,0,0], total_voids_found, R_grid2, 
+                                     cell_frac, Ncells, xdim, ydim, zdim, yzdim, i, j, k)
 
             logger.info(f'Found {voids_found} {self.vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
-            void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
+            void_cell_fraction = np.sum(np.asarray(in_void) > 0, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
             void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
-            logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f})'.format(void_cell_fraction, void_volume_fraction))
+            logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f} without overlap)'.format(void_cell_fraction, void_volume_fraction))
 
         logger.info(f'{total_voids_found} total {self.vf_type}s found.')
-        logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f})')
+        logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f} without overlap)')
 
         # finish by setting the class fields
         self.input_radii = np.asarray(self.Radii)
@@ -513,6 +523,7 @@ cdef class SphericalVoids:
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.radius      = np.asarray(void_rad[:total_voids_found]) * cellsize
         self.counts      = np.asarray(Nvoids)
+        self.cell_membership = np.asarray(in_void)
 
         # post-process voids by counting enclosed galaxies (and randoms)
         if config_space_resizing:

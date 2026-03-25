@@ -63,7 +63,7 @@ int num_voids_around1_wrap(float void_overlap, long total_voids_found, int xdim,
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
 	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
-#pragma omp atomic
+	  #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	}
     }
@@ -102,7 +102,7 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
       if (dist2<((void_radius[l]+R_grid)*(void_radius[l]+R_grid)))
 	{
 	  overlap_frac = calc_void_overlap(void_radius[l], R_grid, dist2);
-#pragma omp atomic
+	  #pragma omp atomic
 	  tot_overlap += overlap_frac;
 	}
     }
@@ -113,8 +113,8 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
 
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
-int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, int xdim, int ydim, int zdim, int yzdim,
-		      	   float R_grid, float R_grid2, long *in_void, int threads)
+int num_voids_around2_wrap(float void_overlap, long *in_void, float R_grid2, float cell_frac,
+                           int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k, int threads)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
@@ -159,10 +159,9 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<=R_grid2)
 		    {
-		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
-#pragma omp atomic
+		      overlap_frac = in_void[num] * cell_frac;
+		      #pragma omp atomic
 		      tot_overlap += overlap_frac;
-		      // nearby_voids += 1;
 		    }
 		}
 	    }
@@ -175,8 +174,8 @@ int num_voids_around2_wrap(float void_overlap, int Ncells, int i, int j, int k, 
 
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
-int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int xdim, int ydim, int zdim, int yzdim,
-		      	   float R_grid, float R_grid2, long *in_void, int threads)
+int num_voids_around2(float void_overlap, long *in_void, float R_grid2, float cell_frac,
+                      int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k, int threads)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
@@ -207,10 +206,9 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<=R_grid2)
 		    {
-		      overlap_frac = in_void[num] * 3 / (4 * M_PI * R_grid*R_grid*R_grid);
-#pragma omp atomic
+		      overlap_frac = in_void[num] * cell_frac;
+		      #pragma omp atomic
 		      tot_overlap += overlap_frac;
-		      // nearby_voids += 1;
 		    }
 		}
 	    }
@@ -221,14 +219,13 @@ int num_voids_around2(float void_overlap, int Ncells, int i, int j, int k, int x
 }
 
 
-void mark_void_region_wrap(long *in_void, int Ncells, int xdim, int ydim, int zdim, 
-			   int yzdim, float R_grid2, int i, int j, int k, int threads)
+void mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
+                           int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1;
-  long number;
-  float dist2;
+  long number, void_id=0;
+  float dist2, merge_frac=0;
 
-#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim) shared(in_void)
   for (l=-Ncells; l<=Ncells; l++)
     {
       //i1 = (i+l+dims)%dims;
@@ -254,22 +251,68 @@ void mark_void_region_wrap(long *in_void, int Ncells, int xdim, int ydim, int zd
 	      if (dist2<=R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
-		  in_void[number] += 1;
+		  //determine overlap fraction
+		  if (in_void[number] > 0 && void_merge != 0)
+		    {
+		      merge_frac += cell_frac;
+	              void_id = in_void[number];
+		    }
+		  else if (in_void[number] == 0)
+		    {
+		      in_void[number] += total_voids_found;
+		    }
+		  //merge voids if overlap detected
+		  if (merge_frac > 1 - void_merge)
+		    {
+	              goto merge_void;
+		    }
 		}
 	    }
 	}
     } 
+  return;
+
+  merge_void:
+    for (l=-Ncells; l<=Ncells; l++)
+      {
+        //i1 = (i+l+dims)%dims;
+        i1 = i+l;
+        if (i1>=xdim) i1 = i1-xdim;
+        if (i1<0)     i1 = i1+xdim;
+          	      
+        for (m=-Ncells; m<=Ncells; m++)
+          {
+            //j1 = (j+m+dims)%dims;
+            j1 = j+m;
+            if (j1>=ydim) j1 = j1-ydim;
+            if (j1<0)     j1 = j1+ydim;
+
+            for (n=-Ncells; n<=Ncells; n++)
+              {
+                //k1 = (k+n+dims)%dims;
+                k1 = k+n;
+                if (k1>=zdim) k1 = k1-zdim;
+                if (k1<0)     k1 = k1+zdim;
+
+                dist2 = l*l + m*m + n*n;
+                if (dist2<=R_grid2)
+          	{
+          	  number = yzdim*i1 + zdim*j1 + k1;
+          	  in_void[number] = void_id;
+          	}
+              }
+          }
+      } 
 }
 
 
-void mark_void_region(long *in_void, int Ncells, int xdim, int ydim, int zdim, 
-		      int yzdim, float R_grid2, int i, int j, int k, int threads)
+void mark_void_region(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
+                      int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1;
-  long number;
-  float dist2;
+  long number, void_id=0;
+  float dist2, merge_frac=0;
 
-#pragma omp parallel for num_threads(threads) private(l,m,n,i1,j1,k1,dist2,number) firstprivate(i,j,k,Ncells,R_grid2,xdim,ydim,zdim,yzdim) shared(in_void)
   for (l=-Ncells; l<=Ncells; l++)
     {
       i1 = i+l;
@@ -286,10 +329,48 @@ void mark_void_region(long *in_void, int Ncells, int xdim, int ydim, int zdim,
 	      if (dist2<=R_grid2)
 		{
 		  number = yzdim*i1 + zdim*j1 + k1;
-		  in_void[number] += 1;
+		  //determine overlap fraction
+		  if (in_void[number] > 0 && void_merge != 0)
+		    {
+		      merge_frac += cell_frac;
+	              void_id = in_void[number];
+		      in_void[number] += total_voids_found;
+		    }
+		  else if (in_void[number] == 0)
+		    {
+		      in_void[number] += total_voids_found;
+		    }
+		  //merge voids if overlap detected
+		  if (merge_frac > 1 - void_merge)
+		    {
+	              goto merge_void;
+		    }
 		}
 	    }
 	}
     } 
-}
+  return;
 
+  merge_void:
+    for (l=-Ncells; l<=Ncells; l++)
+      {
+        i1 = i+l;
+          	      
+        for (m=-Ncells; m<=Ncells; m++)
+          {
+            j1 = j+m;
+
+            for (n=-Ncells; n<=Ncells; n++)
+              {
+                k1 = k+n;
+
+                dist2 = l*l + m*m + n*n;
+                if (dist2<=R_grid2)
+          	{
+          	  number = yzdim*i1 + zdim*j1 + k1;
+          	  in_void[number] = void_id;
+          	}
+              }
+          }
+      } 
+}
