@@ -283,7 +283,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=16):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -381,7 +381,7 @@ cdef class SphericalVoids:
         xdim, ydim, zdim = self.nmesh
         yzdim = ydim * zdim
         # set threads
-        self.threads = os.cpu_count() if threads==0 else threads
+        self.threads = os.cpu_count() if threads==0 else min(threads, os.cpu_count())
         logger.info(f'Running spherical {self.vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
