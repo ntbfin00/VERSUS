@@ -317,6 +317,11 @@ class DensityMesh:
 
         # iterate for better estimate of survey volume
         if not self.box_like:
+            # suppress logging outputs here
+            old_level = logger.level
+            if logger.getEffectiveLevel() == logging.INFO:
+                logger.setLevel(logging.WARNING)
+
             self._set_mesh_density(mesh, **kwargs)
             survey_mask = mesh.mesh_delta.value != 0.
             # estimate survey volume
@@ -324,6 +329,8 @@ class DensityMesh:
             # estimate average galaxy separation
             self.r_sep = (4 * np.pi * mesh.rho_mean / 3)**(-1/3)
             self.rho_mean = mesh.rho_mean
+
+            logger.setLevel(old_level)
             
         logger.info(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.4f}")
 
