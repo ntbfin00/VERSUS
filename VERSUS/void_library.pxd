@@ -7,7 +7,7 @@ cdef extern from "void_library.h":
 
       int num_voids_around2(float void_overlap, long *in_void, float R_grid2, 
                             float cell_frac, int Ncells, int xdim, int ydim, 
-                            int zdim, int yzdim, int i, int j, int k, int threads);
+                            int zdim, int yzdim, int i, int j, int k);
 
       int mark_void_region(float void_merge, long *in_void, long total_voids_found, 
                            float R_grid2, float cell_frac, int Ncells, int xdim, 
@@ -20,7 +20,7 @@ cdef extern from "void_library.h":
 
       int num_voids_around2_wrap(float void_overlap, long *in_void, float R_grid2, 
                                  float cell_frac, int Ncells, int xdim, int ydim, 
-                                 int zdim, int yzdim, int i, int j, int k, int threads);
+                                 int zdim, int yzdim, int i, int j, int k);
 
       int mark_void_region_wrap(float void_merge, long *in_void, long total_voids_found, 
                                 float R_grid2, float cell_frac, int Ncells, int xdim, 

@@ -79,6 +79,7 @@ cdef class SphericalVoids:
     cdef public object input_radii
     cdef public object position
     cdef public object radius
+    cdef public object id 
     cdef public object counts
     cdef public object size_function
     cdef public object cell_membership
@@ -244,11 +245,13 @@ cdef class SphericalVoids:
 
         new_position = np.zeros_like(self.position)
         new_radius = np.zeros_like(self.radius)
+        new_id = np.zeros_like(self.id)
         Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
         N_tot = 0
         # loop through void positions
         for p in range(self.position.shape[0]):
             pos = self.position[p]
+            void_id = self.id[p]
             # loop through input radii bins
             for q in range(self.input_radii.size):
                 R = self.Radii[q]
@@ -267,12 +270,14 @@ cdef class SphericalVoids:
                 if sign * delta_enc < void_delta:
                     new_position[N_tot] = pos
                     new_radius[N_tot] = R
+                    new_id[N_tot] = void_id 
                     Nvoids[q] += 1
                     N_tot += 1
                     break
 
         self.position = new_position[:N_tot]
         self.radius   = new_radius[:N_tot]
+        self.id       = new_id[:N_tot]
         self.counts   = np.asarray(Nvoids)
 
 
@@ -496,7 +501,7 @@ cdef class SphericalVoids:
                         # detect nearby voids using cell searching
                         nearby_voids = num_voids_around2(self.void_overlap, &in_void[0,0,0], 
                                                          R_grid2, cell_frac, Ncells, xdim, ydim, 
-                                                         zdim, yzdim, i, j, k, threads2)
+                                                         zdim, yzdim, i, j, k)
 
                 # if new void detected
                 if nearby_voids == 0:
@@ -527,6 +532,7 @@ cdef class SphericalVoids:
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.radius      = np.asarray(void_rad[:total_voids_found]) * cellsize
         self.counts      = np.asarray(Nvoids)
+        self.id          = np.asarray(void_id[:total_voids_found], dtype=np.int32)
         self.cell_membership = np.asarray(in_void)
 
         # determine radii of merged voids
@@ -542,6 +548,7 @@ cdef class SphericalVoids:
             merged = Nchild > 1
             self.radius[merged] = rad_merged[merged]
             self.position = self.position[parent_index]
+            self.id = self.id[parent_index]
             self.counts = np.histogram(self.radius, bins=np.insert(self.Radii, 0, np.inf)[::-1])[0][::-1]
 
         # optionally post-process voids by counting enclosed galaxies (and randoms)

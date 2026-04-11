@@ -114,13 +114,12 @@ int num_voids_around1(float void_overlap, long total_voids_found, int xdim, int 
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
 int num_voids_around2_wrap(float void_overlap, long *in_void, float R_grid2, float cell_frac,
-                           int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k, int threads)
+                           int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
   float dist2, overlap_frac, tot_overlap=0.;
 
-#pragma omp parallel for num_threads(threads) private(l, m, n, i1, j1, k1, num, dist2)
   for (l=-Ncells; l<=Ncells; l++)
     {
       // exit if void volume overlap greater than threshold 
@@ -159,8 +158,7 @@ int num_voids_around2_wrap(float void_overlap, long *in_void, float R_grid2, flo
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<=R_grid2)
 		    {
-		      overlap_frac = in_void[num] * cell_frac;
-		      #pragma omp atomic
+		      overlap_frac = (in_void[num] > 0) * cell_frac;
 		      tot_overlap += overlap_frac;
 		    }
 		}
@@ -175,13 +173,12 @@ int num_voids_around2_wrap(float void_overlap, long *in_void, float R_grid2, flo
 // This routine looks at the cells around a given cell to see if those belong
 // to other voids
 int num_voids_around2(float void_overlap, long *in_void, float R_grid2, float cell_frac,
-                      int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k, int threads)
+                      int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1, nearby_voids=0;
   long num;
   float dist2, overlap_frac, tot_overlap=0.;
 
-#pragma omp parallel for num_threads(threads) private(l, m, n, i1, j1, k1, num, dist2)
   for (l=-Ncells; l<=Ncells; l++)
     {
       // exit if void volume overlap greater than threshold 
@@ -206,8 +203,7 @@ int num_voids_around2(float void_overlap, long *in_void, float R_grid2, float ce
 		  dist2 = l*l + m*m + n*n;
 		  if (dist2<=R_grid2)
 		    {
-		      overlap_frac = in_void[num] * cell_frac;
-		      #pragma omp atomic
+		      overlap_frac = (in_void[num] > 0) * cell_frac;
 		      tot_overlap += overlap_frac;
 		    }
 		}
@@ -309,8 +305,10 @@ int mark_void_region_wrap(float void_merge, long *in_void, long total_voids_foun
 }
 
 
+// This routine marks surrounding cells belonging to void with a void ID and accounts for void merging.
+// Returns the void ID.
 int mark_void_region(float void_merge, long *in_void, long total_voids_found, float R_grid2, float cell_frac,                                 
-                      int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
+                     int Ncells, int xdim, int ydim, int zdim, int yzdim, int i, int j, int k)
 {
   int l, m, n, i1, j1, k1;
   long number, void_id=0;
@@ -319,15 +317,12 @@ int mark_void_region(float void_merge, long *in_void, long total_voids_found, fl
   for (l=-Ncells; l<=Ncells; l++)
     {
       i1 = i+l;
-		      
       for (m=-Ncells; m<=Ncells; m++)
 	{
 	  j1 = j+m;
-
 	  for (n=-Ncells; n<=Ncells; n++)
 	    {
 	      k1 = k+n;
-
 	      dist2 = l*l + m*m + n*n;
 	      if (dist2<=R_grid2)
 		{
@@ -337,7 +332,6 @@ int mark_void_region(float void_merge, long *in_void, long total_voids_found, fl
 		    {
 		      merge_frac += cell_frac;
 	              void_id = in_void[number];
-		      in_void[number] += total_voids_found;
 		    }
 		  else if (in_void[number] == 0)
 		    {
@@ -352,21 +346,18 @@ int mark_void_region(float void_merge, long *in_void, long total_voids_found, fl
 	    }
 	}
     } 
-  return;
+  return total_voids_found;
 
   merge_void:
     for (l=-Ncells; l<=Ncells; l++)
       {
         i1 = i+l;
-          	      
         for (m=-Ncells; m<=Ncells; m++)
           {
             j1 = j+m;
-
             for (n=-Ncells; n<=Ncells; n++)
               {
                 k1 = k+n;
-
                 dist2 = l*l + m*m + n*n;
                 if (dist2<=R_grid2)
           	{
@@ -376,4 +367,5 @@ int mark_void_region(float void_merge, long *in_void, long total_voids_found, fl
               }
           }
       } 
+    return void_id;
 }
