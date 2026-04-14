@@ -88,7 +88,7 @@ cdef class SphericalVoids:
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
                  reconstruct=None, recon_args=None, delta_mesh=None, mesh_args=None, 
-                 dtype='f4', boxsize=None, boxcenter=None, init_sm_frac=0.45, use_wisdom=False, **kwargs):
+                 dtype='f4', boxsize=None, boxcenter=None, rand_sm_frac=4, use_wisdom=False, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
                       'data_positions', 'random_positions', 'data_weights', 'random_weights']
@@ -101,7 +101,7 @@ cdef class SphericalVoids:
             delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                      random_positions=random_positions, random_weights=random_weights, 
                                      data_cols=data_cols, reconstruct=reconstruct, recon_args=recon_args,
-                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter, init_sm_frac=init_sm_frac)
+                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter, rand_sm_frac=rand_sm_frac)
             delta_mesh.create_mesh(use_wisdom=self.use_wisdom, **kwargs)
             for name in properties:
                 if name.endswith('_positions'):
@@ -354,8 +354,7 @@ cdef class SphericalVoids:
         Rspurious = self.rmin_spurious(sign)
         # set default radii if not provided
         if radii[0] == 0.:
-            # Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
-            Radii = np.exp(np.log(25) + (np.log(60) - np.log(25)) *  np.arange(20) / (20 - 1), dtype=np.float32)[::-1]; 
+            Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
             self.Radii = Radii[(Radii > cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
             logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
@@ -536,7 +535,7 @@ cdef class SphericalVoids:
         self.cell_membership = np.asarray(in_void)
 
         # determine radii of merged voids
-        if void_merge:
+        if void_overlap and void_merge:
             logger.info('Determining radii of merged voids')
             parent_id, parent_index, Nchild = np.unique(void_id[:total_voids_found], 
                                                         return_index=True, return_counts=True)
@@ -697,7 +696,8 @@ cdef class SphericalVoids:
 
         # create plot
         label = kwargs.pop('label', None)
-        color = kwargs.pop('color', 'red')
+        color = kwargs.pop('color', 
+                           'goldenrod' if data_positions is None else 'red')
         for (i, (c, r)) in enumerate(zip(centers, radii)):
             circ = Circle((c[axes[0]], c[axes[1]]), r, fill=False, edgecolor=color, 
                           label=None if i>0 else label, **kwargs)
@@ -706,9 +706,9 @@ cdef class SphericalVoids:
         ax.set_ylabel(axes_labels[1] + r' $[h^{-1}{\rm Mpc}]$', fontsize=15)
         ax.set_xlim(boxlims[axes[0]])
         ax.set_ylim(boxlims[axes[1]])
-        ax.set_title((rf'{slice_range[0]} $[h^{{-1}}{{\rm Mpc}}]$' 
-                    + rf'$\leq {slice_axis.upper()} \leq$' 
-                    + rf'{slice_range[1]} $[h^{{-1}}{{\rm Mpc}}]$'),
+        ax.set_title((rf'{slice_range[0]} $\leq$ ' 
+                    + rf'{slice_axis.upper()} $[h^{{-1}}{{\rm Mpc}}]$' 
+                    + rf' $\leq$ {slice_range[1]}'),
                     fontsize=15)
         ax.set_aspect('equal')
 

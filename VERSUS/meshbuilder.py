@@ -41,8 +41,8 @@ class DensityMesh:
     recon_args: dict
         Reconstruction arguments - 'f', 'bias', 'los' (only required for box), 'engine' and 'smoothing radius'.
 
-    init_sm_frac: float, default=0.45
-        Inititial spherical smoothing for galaxies and randoms on mesh.
+    rand_sm_frac: float, default=4
+        Inititial spherical smoothing for randoms on mesh as a fraction of the average separation. 
 
     boxsize: list, default=None
         Size of simulation box (only required when self.box_like=True). If None, estimated from galaxy/random positions.
@@ -56,12 +56,12 @@ class DensityMesh:
 
     def __init__(self, data_positions, data_weights=None, random_positions=None, random_weights=None, 
                  data_cols=None, dtype='f4', threads=None, reconstruct=None, recon_args=None, 
-                 init_sm_frac=0.45, boxsize=None, boxcenter=None, **kwargs):
+                 rand_sm_frac=4, boxsize=None, boxcenter=None, **kwargs):
 
         # if randoms are supplied then treat as survey
         self.box_like = True if random_positions is None else False
         logger.info('Loading {}-like data'.format('box' if self.box_like else 'survey'))
-        self.init_sm_frac = init_sm_frac
+        self.rand_sm_frac = rand_sm_frac
         self.dtype = dtype
         self.threads = os.cpu_count() if threads is None else 8
         logger.debug(f'Data type: {self.dtype}, Threads: {self.threads}')
@@ -155,7 +155,7 @@ class DensityMesh:
         return positions, weights
 
 
-    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=4., boxpad=1.1, nmesh=None, **kwargs):
+    def _set_mesh(self, engine='IterativeFFTParticleReconstruction', cellsize=4., boxpad=1.1, nmesh=None, bias=1., **kwargs):
         r"""
         Set the mesh properties and type of reconstruction algorithm
 
@@ -187,18 +187,21 @@ class DensityMesh:
             positions = self.random_positions
             wrap = False
 
+
         # select reconstruction algorithm
         exec(f"from pyrecon import {engine}; Recon = {engine}", globals())
 
         # initialise mesh
-        mesh = Recon(positions=positions, cellsize=cellsize, nmesh=nmesh, 
+        mesh = Recon(positions=positions, cellsize=cellsize, nmesh=nmesh, bias=bias,
                      boxsize=boxsize, boxcenter=boxcenter, boxpad=boxpad, 
                      wrap=wrap, dtype=self.dtype, nthreads=self.threads, **kwargs)
+        # determine volume of bounding box without padding
+        mesh.volume = mesh.boxsize.prod() * boxpad**-3 
         logger.debug(f"Boxsize: {mesh.boxsize}, Boxcenter: {mesh.boxcenter}, Cellsize: {mesh.cellsize}")
 
         return mesh
 
-    def _set_mesh_density(self, mesh, threshold_randoms=0.01, use_wisdom=False):
+    def _set_mesh_density(self, mesh, rand_sm_frac=0.5, threshold_randoms=0.01, use_wisdom=False, **kwargs):
         r"""
         Populate mesh with galaxies and randoms
 
@@ -214,14 +217,7 @@ class DensityMesh:
         # assign randoms
         if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
 
-        r_smooth = self.init_sm_frac * self.r_sep
-        logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(r_smooth))
         mesh.mesh_delta = mesh.mesh_data.copy()
-        mesh.mesh_delta.value = tophat_smoothing(mesh.mesh_data, 
-                                                 r_smooth,
-                                                 mesh.cellsize,
-                                                 threads=self.threads,
-                                                 use_wisdom=use_wisdom)[0]
         del mesh.mesh_data
 
         if self.box_like:
@@ -229,13 +225,16 @@ class DensityMesh:
             mesh.mesh_delta /= mesh.mesh_delta.cmean()
             mesh.mesh_delta -= 1
         else:
-            mesh.mesh_randoms.value = tophat_smoothing(mesh.mesh_randoms, 
-                                                       r_smooth,
-                                                       mesh.cellsize,
-                                                       threads=self.threads,
-                                                       use_wisdom=use_wisdom)[0]
+            if rand_sm_frac > 0.:
+                r_smooth = self.r_sep_random * rand_sm_frac
+                logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(r_smooth))
+                mesh.mesh_randoms.value = tophat_smoothing(mesh.mesh_randoms, 
+                                                           r_smooth,
+                                                           mesh.cellsize,
+                                                           threads=self.threads,
+                                                           use_wisdom=use_wisdom)[0]
 
-            sum_data, sum_randoms = mesh.mesh_delta.csum(), mesh.mesh_randoms.csum()
+                sum_data, sum_randoms = mesh.mesh_delta.csum(), mesh.mesh_randoms.csum()
             alpha = sum_data * 1. / sum_randoms
             logger.info(f"{1/alpha:.0f}x number of randoms used")
 
@@ -247,12 +246,17 @@ class DensityMesh:
             mesh.rho_mean = np.zeros(mesh.mesh_delta.slabs.nslabs)
             for (i, (delta, randoms)) in enumerate(zip(mesh.mesh_delta.slabs, mesh.mesh_randoms.slabs)):
                 mask = randoms > threshold
-                if mask.sum() == 0: continue
+                if mask.sum() == 0: 
+                    delta[...] = 0.
+                    continue
 
                 delta[mask] /= (alpha * randoms)[mask]
-                delta[~mask] = 0.
+                delta[~mask] = 0. 
 
                 mesh.rho_mean[i] = np.mean((alpha * randoms)[mask])
+
+            if hasattr(self, 'survey_mask'):
+                mesh.mesh_delta[~self.survey_mask] = 0.
 
             del mesh.mesh_randoms
             mesh.rho_mean = np.mean(mesh.rho_mean, where=mesh.rho_mean>0) / mesh.cellsize.prod()
@@ -276,7 +280,7 @@ class DensityMesh:
         logger.info(f"Recon parameters: f={f:.2f}, b={bias:.2f}, los={los}, r_smooth={smoothing_radius}")
         # set and smooth mesh
         self.data_mesh = self._set_mesh(f=f, bias=bias, engine=engine, cellsize=self.cellsize, los=los,
-                                        boxpad=boxpad, fft_engine='fftw', fft_plan='estimate', **kwargs)
+                boxpad=boxpad, fft_engine='fftw', fft_plan='estimate', **kwargs)
         self.data_mesh.assign_data(self.data_positions, self.data_weights)
         if not self.box_like: self.data_mesh.assign_randoms(self.random_positions, self.random_weights)
         self.data_mesh.set_density_contrast(smoothing_radius=smoothing_radius)
@@ -291,15 +295,22 @@ class DensityMesh:
             self.random_positions = self.data_mesh.read_shifted_positions(self.random_positions, field='disp')  # RecIso
         del self.data_mesh
 
-        
-    def size_mesh(self, nmesh=512, **kwargs):
+
+    # def size_mesh(self, cellsize=4, boxpad=1., n_itr=5, atol=1e-5, **kwargs):
+    def size_mesh(self, n_itr=5, atol=1e-5, **kwargs):
         r"""
         Estimate the survey volume, mean density and average galaxy separation.
 
         Parameters
         ----------
-        nmesh : float, default=500.
-            Number of mesh cells (along a single dimension) used to estimate the average galaxy separation.
+        cellsize: float, default=4.
+            Size of mesh cell.
+        boxpad: float, default=1.
+            Padding applied to mesh.
+        n_itr: int, default=5
+            Maximum number of iterations used to estimate survey volume.
+        atol: float, default=1e-5
+            Absolute tolerance on the mean density estimate required to allow early termination of the routine.
         kwargs : dict
             Optional arguments for DensityMesh._set_mesh_density().
         """
@@ -307,9 +318,9 @@ class DensityMesh:
         logger.info(f'Estimating volume and average galaxy separation (Ngal = {self.N_data})')
 
         # create mesh flush with survey volume
-        mesh = self._set_mesh(boxpad=1., nmesh=nmesh, bias=1.)
+        mesh = self._set_mesh(**kwargs)
         # first estimate of volume (true if box)
-        self.volume = mesh.boxsize.prod()
+        self.volume = mesh.volume
         # first estimate of mean density
         self.rho_mean = self.W_data / self.volume
         # first estimate of average separation between galaxies
@@ -322,19 +333,29 @@ class DensityMesh:
             if logger.getEffectiveLevel() == logging.INFO:
                 logger.setLevel(logging.WARNING)
 
-            self._set_mesh_density(mesh, **kwargs)
-            survey_mask = mesh.mesh_delta.value != 0.
-            # estimate survey volume
-            self.volume = survey_mask.sum() * mesh.cellsize.prod()
-            # estimate average galaxy separation
-            self.r_sep = (4 * np.pi * mesh.rho_mean / 3)**(-1/3)
-            self.rho_mean = mesh.rho_mean
+            rho_mean = 0
+            for i in range(n_itr):
+                self.r_sep_random = (4 * np.pi * self.W_random / self.volume / 3)**(-1/3)
+                self._set_mesh_density(mesh, **kwargs)
+                survey_mask = mesh.mesh_delta.value != 0.
+                # estimate survey volume
+                self.volume = survey_mask.sum() * mesh.cellsize.prod()
+                # check change in mean density
+                self.rho_mean = mesh.rho_mean
+                if abs(self.rho_mean - rho_mean) < atol:
+                    break
+                rho_mean = self.rho_mean
+                # estimate average galaxy separation
+                self.r_sep = (4 * np.pi * rho_mean / 3)**(-1/3)
+
+            self.survey_mask = survey_mask
+            logger.info("Survey mask set")
 
             logger.setLevel(old_level)
-            
-        logger.info(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.4f}")
 
-        
+        logger.info(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.5f}")
+
+
     def create_mesh(self, boxpad=1.1, cellsize=4., save_mesh=None, use_wisdom=False, **kwargs):
         r"""
         Create the density mesh
@@ -362,7 +383,13 @@ class DensityMesh:
         """
 
         self.cellsize = cellsize
-        self.size_mesh(**kwargs)
+        self.boxpad = boxpad
+
+        # determine simulation/survey boundary
+        self.size_mesh(cellsize=self.cellsize, 
+                       boxpad=self.boxpad, 
+                       **kwargs)
+
         if (self.rho_mean * self.cellsize**3) > 1: 
             logger.warning("Cellsize exceeds one galaxy per cell. Mesh is no longer shot-noise dominated.")
 
@@ -371,14 +398,15 @@ class DensityMesh:
 
         # generate mesh
         mesh = self._set_mesh(cellsize=self.cellsize,
-                              engine='IterativeFFTParticleReconstruction', # faster when smoothing is not required
-                              boxpad=boxpad, # pad if survey to better detect boundary voids
-                              bias=1.,  # bias set to 1. so voids are found on galaxy (not matter) field
-                              resampler='ngp')  # Do not perform 'smoothing' during particle assignment to mesh
+                engine='IterativeFFTParticleReconstruction', # faster when smoothing is not required
+                boxpad=boxpad, # pad if survey to better detect boundary voids
+                # bias=1.,  # bias set to 1. so voids are found on galaxy (not matter) field
+                resampler='ngp')  # Do not perform 'smoothing' during particle assignment to mesh
 
         logger.info(f'Estimating mesh density (nmesh={mesh.nmesh})')
         logger.debug(f'Mass-Assignment-Scheme: {mesh.resampler.kind}')
-        self._set_mesh_density(mesh, use_wisdom=use_wisdom, **kwargs)
+        self._set_mesh_density(mesh, rand_sm_frac=self.rand_sm_frac,
+                               use_wisdom=use_wisdom, **kwargs)
 
         self.delta = mesh.mesh_delta.value
         self.nmesh = mesh.nmesh
