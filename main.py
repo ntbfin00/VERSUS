@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
     parser.add_argument('--void_overlap', default=True, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
     parser.add_argument('--void_merge', default=0.9, help="Boolean or maximum fraction of non-overlapping region to be considered for merging. True merges all overlapping voids while False prevents merging.")
-    parser.add_argument('--smoothing', default=4, help="Radius to initially smooth random field as fraction of average separation.")
+    parser.add_argument('--smoothing', type=float, default=4, help="Radius to initially smooth random field as fraction of average separation.")
     parser.add_argument('--cs_resizing', required=False, action='store_true', help="Resize voids in configuration space directly using galaxy positions.")
     parser.add_argument('--save_fn', type=str, default=None, help="Path to save void-finding output. Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=8, 

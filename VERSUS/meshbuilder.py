@@ -201,7 +201,7 @@ class DensityMesh:
 
         return mesh
 
-    def _set_mesh_density(self, mesh, rand_sm_frac=0.5, threshold_randoms=0.01, use_wisdom=False, **kwargs):
+    def _set_mesh_density(self, mesh, rand_sm_frac=4, threshold_randoms=0.1, use_wisdom=False, **kwargs):
         r"""
         Populate mesh with galaxies and randoms
 
@@ -214,9 +214,6 @@ class DensityMesh:
 
         # assign data
         mesh.assign_data(self.data_positions, self.data_weights)
-        # assign randoms
-        if not self.box_like: mesh.assign_randoms(self.random_positions, self.random_weights)
-
         mesh.mesh_delta = mesh.mesh_data.copy()
         del mesh.mesh_data
 
@@ -225,41 +222,51 @@ class DensityMesh:
             mesh.mesh_delta /= mesh.mesh_delta.cmean()
             mesh.mesh_delta -= 1
         else:
+            # assign randoms
+            mesh.assign_randoms(self.random_positions, self.random_weights)
+            # smooth randoms
             if rand_sm_frac > 0.:
                 r_smooth = self.r_sep_random * rand_sm_frac
-                logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the density field".format(r_smooth))
+                logger.info("Applying initial smoothing of R={:.1f} Mpc/h to the random field".format(r_smooth))
+                
+                # mitigate boundary smoothing effects by padding randoms
+                if hasattr(self, 'survey_mask'):
+                    mesh.mesh_randoms[~self.survey_mask] = mesh.mesh_randoms[self.survey_mask].mean()
+
                 mesh.mesh_randoms.value = tophat_smoothing(mesh.mesh_randoms, 
                                                            r_smooth,
                                                            mesh.cellsize,
                                                            threads=self.threads,
                                                            use_wisdom=use_wisdom)[0]
 
+            if not hasattr(self, 'alpha'):
                 sum_data, sum_randoms = mesh.mesh_delta.csum(), mesh.mesh_randoms.csum()
-            alpha = sum_data * 1. / sum_randoms
-            logger.info(f"{1/alpha:.0f}x number of randoms used")
+                self.alpha = sum_data * 1. / sum_randoms
+                self.threshold = threshold_randoms * sum_randoms / mesh._size_randoms
+            logger.info(f"{1/self.alpha:.0f}x number of randoms used")
 
             for delta, randoms in zip(mesh.mesh_delta.slabs, mesh.mesh_randoms.slabs):
-                delta[...] -= alpha * randoms
-
-            threshold = threshold_randoms * sum_randoms / mesh._size_randoms
+                delta[...] -= self.alpha * randoms
 
             mesh.rho_mean = np.zeros(mesh.mesh_delta.slabs.nslabs)
             for (i, (delta, randoms)) in enumerate(zip(mesh.mesh_delta.slabs, mesh.mesh_randoms.slabs)):
-                mask = randoms > threshold
+                mask = randoms > self.threshold
                 if mask.sum() == 0: 
                     delta[...] = 0.
                     continue
 
-                delta[mask] /= (alpha * randoms)[mask]
+                delta[mask] /= (self.alpha * randoms)[mask]
                 delta[~mask] = 0. 
 
-                mesh.rho_mean[i] = np.mean((alpha * randoms)[mask])
+                mesh.rho_mean[i] = np.mean((self.alpha * randoms)[mask])
 
             if hasattr(self, 'survey_mask'):
                 mesh.mesh_delta[~self.survey_mask] = 0.
+                mesh.rho_mean = mesh.mesh_randoms[self.survey_mask].mean() * self.alpha  / mesh.cellsize.prod()
+            else:
+                mesh.rho_mean = np.mean(mesh.rho_mean, where=mesh.rho_mean>0) / mesh.cellsize.prod()
 
             del mesh.mesh_randoms
-            mesh.rho_mean = np.mean(mesh.rho_mean, where=mesh.rho_mean>0) / mesh.cellsize.prod()
 
 
     def run_recon(self, f=None, bias=None, los=None, engine='IterativeFFTReconstruction', 
@@ -296,29 +303,20 @@ class DensityMesh:
         del self.data_mesh
 
 
-    # def size_mesh(self, cellsize=4, boxpad=1., n_itr=5, atol=1e-5, **kwargs):
-    def size_mesh(self, n_itr=5, atol=1e-5, **kwargs):
+    def size_mesh(self, **kwargs):
         r"""
         Estimate the survey volume, mean density and average galaxy separation.
 
         Parameters
         ----------
-        cellsize: float, default=4.
-            Size of mesh cell.
-        boxpad: float, default=1.
-            Padding applied to mesh.
-        n_itr: int, default=5
-            Maximum number of iterations used to estimate survey volume.
-        atol: float, default=1e-5
-            Absolute tolerance on the mean density estimate required to allow early termination of the routine.
         kwargs : dict
-            Optional arguments for DensityMesh._set_mesh_density().
+            Optional arguments for DensityMesh._set_mesh and DensityMesh._set_mesh_density.
         """
 
         logger.info(f'Estimating volume and average galaxy separation (Ngal = {self.N_data})')
 
         # create mesh flush with survey volume
-        mesh = self._set_mesh(**kwargs)
+        mesh = self._set_mesh(resampler='tsc', **kwargs)
         # first estimate of volume (true if box)
         self.volume = mesh.volume
         # first estimate of mean density
@@ -333,26 +331,22 @@ class DensityMesh:
             if logger.getEffectiveLevel() == logging.INFO:
                 logger.setLevel(logging.WARNING)
 
-            rho_mean = 0
-            for i in range(n_itr):
-                self.r_sep_random = (4 * np.pi * self.W_random / self.volume / 3)**(-1/3)
-                self._set_mesh_density(mesh, **kwargs)
-                survey_mask = mesh.mesh_delta.value != 0.
-                # estimate survey volume
-                self.volume = survey_mask.sum() * mesh.cellsize.prod()
-                # check change in mean density
-                self.rho_mean = mesh.rho_mean
-                if abs(self.rho_mean - rho_mean) < atol:
-                    break
-                rho_mean = self.rho_mean
-                # estimate average galaxy separation
-                self.r_sep = (4 * np.pi * rho_mean / 3)**(-1/3)
-
-            self.survey_mask = survey_mask
+            self._set_mesh_density(mesh, rand_sm_frac=0., **kwargs)
+            self.survey_mask = mesh.mesh_delta.value != 0.
             logger.info("Survey mask set")
 
-            logger.setLevel(old_level)
+            # estimate survey volume
+            self.volume = self.survey_mask.sum() * mesh.cellsize.prod()
+            # calculate mean density across survey
+            self._set_mesh_density(mesh, rand_sm_frac=0., **kwargs)
+            self.rho_mean = mesh.rho_mean
+            # estimate average galaxy separation
+            self.r_sep = (4 * np.pi * self.rho_mean / 3)**(-1/3)
+            # estimate average random separation
+            self.r_sep_random = (4 * np.pi * self.rho_mean / self.alpha / 3)**(-1/3)
 
+            logger.setLevel(old_level)
+            
         logger.info(f"Volume: {self.volume:.0f}, Density: {self.rho_mean:.5f}")
 
 
@@ -367,9 +361,6 @@ class DensityMesh:
 
         cellsize: float, default=4.
             Size of mesh cells. 
-
-        ran_min : float, default=0.01
-            Minimum fraction of average randoms for cell to be counted as part of survey.
 
         save_mesh : bool, string, default=None
             If not ``None``, path where to save the mesh in FITS format.
