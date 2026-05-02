@@ -11,7 +11,9 @@ Spherical underdensity void-finding with optional real-space reconstruction for 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flowchart_b.png?raw=true">
     <source media="(prefers-color-scheme: light)" srcset="assets/flowchart_w.png?raw=true">
-    <img src="assets/flowchart_w.png?raw=true" alt="VERSUS algorithm" height="80">
+    <img src="assets/flowchart_w.png?raw=true"
+         alt="VERSUS logo"
+         style="width: 100%; max-width: 100%; height: auto;">
   </picture>
 </div>
 
