@@ -17,10 +17,10 @@ cdef class SphericalVoids:
 
     Parameters
     ----------
-    data_positions: array (N), Path
+    data_positions: array (N,3), Path
         Array of data positions (in cartesian or sky coordinates) or path to such positions.
 
-    data_weights: array (N,3), default=None
+    data_weights: array (N), default=None
         Array of data weights.
 
     random_positions: array (N,3), Path
@@ -79,14 +79,16 @@ cdef class SphericalVoids:
     cdef public object input_radii
     cdef public object position
     cdef public object radius
+    cdef public object id 
     cdef public object counts
     cdef public object size_function
+    cdef public object cell_membership
     cdef object fft_plan, ifft_plan, fft_in, fft_out, ifft_in, ifft_out
     
     def __init__(self, data_positions=None, data_weights=None, 
                  random_positions=None, random_weights=None, data_cols=None,
                  reconstruct=None, recon_args=None, delta_mesh=None, mesh_args=None, 
-                 dtype='f4', boxsize=None, boxcenter=None, init_sm_frac=0.45, use_wisdom=False, **kwargs):
+                 dtype='f4', boxsize=None, boxcenter=None, rand_sm_frac=4, use_wisdom=False, **kwargs):
 
         properties = ['r_sep', 'boxsize', 'boxcenter', 'box_like', 'volume', 'delta',
                       'data_positions', 'random_positions', 'data_weights', 'random_weights']
@@ -99,7 +101,7 @@ cdef class SphericalVoids:
             delta_mesh = DensityMesh(data_positions=data_positions, data_weights=data_weights,
                                      random_positions=random_positions, random_weights=random_weights, 
                                      data_cols=data_cols, reconstruct=reconstruct, recon_args=recon_args,
-                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter, init_sm_frac=init_sm_frac)
+                                     dtype=dtype, boxsize=boxsize, boxcenter=boxcenter, rand_sm_frac=rand_sm_frac)
             delta_mesh.create_mesh(use_wisdom=self.use_wisdom, **kwargs)
             for name in properties:
                 if name.endswith('_positions'):
@@ -124,7 +126,6 @@ cdef class SphericalVoids:
             else:
                 if mesh_args is None or not all([arg in mesh_args for arg in properties[:5]]):
                     raise Exception(f'{properties[:5]} must be provided in addition to delta mesh with mesh_args.')
-                logger.warning("data_tree (and random_tree) attributes must be provided along with data_weights (and random_weights) in order to resize voids. Otherwise output will match Pylians")
                 for name in properties:
                     if name in properties[:5]:
                         setattr(self, name, mesh_args[name])
@@ -215,7 +216,7 @@ cdef class SphericalVoids:
     @cython.wraparound(False)
     def resize_voids(self, float sign):
         """
-        Resize voids found on smoothed field to match unsmoothed field according to interior densities calculated directly from the galaxy and random positions.
+        Resize voids found on smoothed field with FFTs according to interior densities calculated directly from the galaxy and random positions.
         """
         cdef int p, q, N_tot
         cdef float fact, delta_enc
@@ -244,11 +245,13 @@ cdef class SphericalVoids:
 
         new_position = np.zeros_like(self.position)
         new_radius = np.zeros_like(self.radius)
+        new_id = np.zeros_like(self.id)
         Nvoids = np.zeros(self.input_radii.size, dtype=np.int32)
         N_tot = 0
         # loop through void positions
         for p in range(self.position.shape[0]):
             pos = self.position[p]
+            void_id = self.id[p]
             # loop through input radii bins
             for q in range(self.input_radii.size):
                 R = self.Radii[q]
@@ -267,12 +270,14 @@ cdef class SphericalVoids:
                 if sign * delta_enc < void_delta:
                     new_position[N_tot] = pos
                     new_radius[N_tot] = R
+                    new_id[N_tot] = void_id 
                     Nvoids[q] += 1
                     N_tot += 1
                     break
 
         self.position = new_position[:N_tot]
         self.radius   = new_radius[:N_tot]
+        self.id       = new_id[:N_tot]
         self.counts   = np.asarray(Nvoids)
 
 
@@ -283,7 +288,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=False, void_resizing=True, int threads=8):
+    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=16):
         r"""
         Run spherical voidfinding on density mesh.
 
@@ -296,8 +301,15 @@ cdef class SphericalVoids:
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
 
-        void_overlap: float, default=False
+        void_overlap: float, default=True
             Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
+
+        void_merge: float, default=0.9
+            Merge threshold for overlapping void. If overlapping region exceeds (1 - void_merge), void is merged.
+            If void_merge=True, always merge overlapping voids; if void_merge=False, never merge overlaps.
+
+        config_space_resizing: bool, default=False
+            Resize the voids using their positions. Useful for checking FFT smoothing result.
 
         threads: int, default=8
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
@@ -308,7 +320,7 @@ cdef class SphericalVoids:
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
         cdef long max_num_voids, voids_found, total_voids_found, ID
-        cdef float vol_mesh, vol_void, norm
+        cdef float vol_cell, vol_mesh, vol_void, norm
         cdef float[:,:,::1] delta_sm
         cdef long[:,:,::1] in_void
         cdef long[::1] IDs
@@ -322,8 +334,8 @@ cdef class SphericalVoids:
         cdef long local_voids
         cdef long[::1] indexes, IDs_temp
 
-        if void_resizing and self.data_tree is None:
-            raise Exception("Galaxy positions (random positions) must be provided as self.data_tree (self.random_tree) for voids to be resized to match output of unsmoothed field.")
+        if config_space_resizing and self.data_tree is None:
+            raise Exception("Galaxy positions (random positions) must be provided as self.data_tree (self.random_tree) for configuration space resizing.")
 
         # set maximum density threshold for cell to be classified as void
         self.void_delta = void_delta
@@ -347,7 +359,7 @@ cdef class SphericalVoids:
             logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
             # ensure extra bin for void resizing
-            if void_resizing:
+            if config_space_resizing:
                 Radii = np.append(Radii, Radii.min() - 2).astype(np.float32)
             # order input radii from largest to smallest
             self.Radii = self._sort_radii(Radii)
@@ -358,6 +370,11 @@ cdef class SphericalVoids:
         if Rmin < Rspurious: logger.warning(f"Spurious {self.vf_type}s may enter sample (for Rmin < {Rspurious:.0f} Mpc/h)")
 
         # set allowed void overlap for void classification
+        if void_overlap: 
+            if void_merge:
+                logger.info(f">{(1 - void_merge)*100:.0f}% void overlap required for merging")
+            else:
+                logger.info("No void merging")
         if type(void_overlap) is bool: 
             self.void_overlap = 0.
         else:
@@ -368,7 +385,7 @@ cdef class SphericalVoids:
         xdim, ydim, zdim = self.nmesh
         yzdim = ydim * zdim
         # set threads
-        self.threads = os.cpu_count() if threads==0 else threads
+        self.threads = os.cpu_count() if threads==0 else min(threads, os.cpu_count())
         logger.info(f'Running spherical {self.vf_type}-finder with {self.threads} threads (delta {ineq} {self.void_delta:.2f})')
 
         # check that radii are compatible with grid resolution
@@ -378,7 +395,8 @@ cdef class SphericalVoids:
             # logger.warning(f"Radii are binned more finely than cellsize {self.cellsize:.1f}. May induce bin-to-bin correlations.")
 
         # determine mesh volume
-        vol_mesh = np.prod(self.cellsize) * nmesh_tot
+        vol_cell = np.prod(self.cellsize)
+        vol_mesh = vol_cell * nmesh_tot
         # determine non-overlapping volume of smallest void
         vol_void = (1 - self.void_overlap) * 4 * np.pi * Rmin**3 / 3
         # determine maximum possible number of voids
@@ -387,8 +405,9 @@ cdef class SphericalVoids:
         logger.debug(f"Maximum number of voids = {max_num_voids:d}")
 
         # define arrays containing void positions and radii
-        void_pos    = np.zeros((max_num_voids, 3), dtype=np.int32)
-        void_rad    = np.zeros(max_num_voids,      dtype=np.float32)
+        void_pos = np.zeros((max_num_voids, 3), dtype=np.int32)
+        void_rad = np.zeros(max_num_voids,      dtype=np.float32)
+        void_id  = np.zeros(max_num_voids,      dtype=np.float32)
         Nvoids = np.zeros(bins,   dtype=np.int32)
 
         # define the in_void and delta_v array
@@ -422,7 +441,7 @@ cdef class SphericalVoids:
                 logger.info(f'No cells with delta {ineq} {self.void_delta:.2f} for R={R:.1f} Mpc/h')
                 continue
 
-            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and asineqing IDs')
+            logger.debug(f'Looping through {delta_sm.size:d} cells to find underdensities and assigning IDs')
             local_voids = 0
             for i in range(xdim):
                 for j in range(ydim):
@@ -449,10 +468,11 @@ cdef class SphericalVoids:
             # determine void radius in terms of number of mesh cells
             R_grid = R / cellsize; Ncells = <int>R_grid + 1
             R_grid2 = R_grid * R_grid
+            cell_frac = 3 / (4 * np.pi * R_grid * R_grid2)
             voids_found = 0 
 
             # select method to identify nearby voids based on radius
-            mode = 0 if total_voids_found < (2*Ncells+1)**3 else 1
+            mode = 0 if total_voids_found < (2*Ncells+1)**3.0 else 1
             threads2 = 1 if Ncells<12 else min(4, self.threads)  # empirically this seems to be the best
             logger.debug(f'Setting threads2 = {threads2} (threads={self.threads})')
             if not void_overlap: logger.debug(f'Identifying nearby voids using mode {mode}')
@@ -478,10 +498,9 @@ cdef class SphericalVoids:
                                                          R_grid, threads2)
                     else:
                         # detect nearby voids using cell searching
-                        nearby_voids = num_voids_around2(self.void_overlap, Ncells, i, j, k, 
-                                                         xdim, ydim, zdim, yzdim,
-                                                         R_grid, R_grid2, 
-                                                         &in_void[0,0,0], threads2)
+                        nearby_voids = num_voids_around2(self.void_overlap, &in_void[0,0,0], 
+                                                         R_grid2, cell_frac, Ncells, xdim, ydim, 
+                                                         zdim, yzdim, i, j, k)
 
                 # if new void detected
                 if nearby_voids == 0:
@@ -490,20 +509,21 @@ cdef class SphericalVoids:
                     void_pos[total_voids_found, 2] = k
                     void_rad[total_voids_found] = R_grid
 
+                    void_id[total_voids_found] = mark_void_region(void_merge, &in_void[0,0,0], 
+                                                                  total_voids_found + 1, R_grid2, 
+                                                                  cell_frac, Ncells, xdim, ydim, 
+                                                                  zdim, yzdim, i, j, k)
                     voids_found += 1; total_voids_found += 1
-
-                    mark_void_region(&in_void[0,0,0], Ncells, xdim, ydim, zdim,
-                                     yzdim, R_grid2, i, j, k, threads=1)
 
             logger.info(f'Found {voids_found} {self.vf_type}s with radius R={R:.1f} Mpc/h')
             Nvoids[q] = voids_found 
 
-            void_cell_fraction = np.sum(in_void, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
-            void_volume_fraction += voids_found * 4.0 * np.pi * R**3 / (3.0 * vol_mesh) # volume determined using void radii
-            logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f})'.format(void_cell_fraction, void_volume_fraction))
+            void_cell_fraction = np.sum(np.asarray(in_void) > 0, dtype=np.int64) * 1.0/nmesh_tot  # volume determined using filled cells
+            void_volume_fraction += voids_found * 4.0 * np.pi * R**3.0 / (3.0 * vol_mesh) # volume determined using void radii
+            logger.debug('Occupied void volume fraction = {:.3f} (expected {:.3f} without overlap)'.format(void_cell_fraction, void_volume_fraction))
 
         logger.info(f'{total_voids_found} total {self.vf_type}s found.')
-        logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f})')
+        logger.info(f'Occupied {self.vf_type} volume fraction = {void_cell_fraction:.3f} (expected {void_volume_fraction:.3f} without overlap)')
 
         # finish by setting the class fields
         self.input_radii = np.asarray(self.Radii)
@@ -511,9 +531,27 @@ cdef class SphericalVoids:
         self.position    = pos * np.asarray(self.cellsize, dtype=np.float32)  # transform positions relative to data 
         self.radius      = np.asarray(void_rad[:total_voids_found]) * cellsize
         self.counts      = np.asarray(Nvoids)
+        self.id          = np.asarray(void_id[:total_voids_found], dtype=np.int32)
+        self.cell_membership = np.asarray(in_void)
 
-        # post-process voids by counting enclosed galaxies (and randoms)
-        if void_resizing:
+        # determine radii of merged voids
+        if void_overlap and void_merge:
+            logger.info('Determining radii of merged voids')
+            parent_id, parent_index, Nchild = np.unique(void_id[:total_voids_found], 
+                                                        return_index=True, return_counts=True)
+            parent_ncells = np.unique(self.cell_membership[self.cell_membership>0], return_counts=True)[1]
+
+            # estimate radius from volume of cell members
+            rad_merged = np.cbrt(parent_ncells * vol_cell * 3 / 4 / np.pi)
+            self.radius = self.radius[parent_index]
+            merged = Nchild > 1
+            self.radius[merged] = rad_merged[merged]
+            self.position = self.position[parent_index]
+            self.id = self.id[parent_index]
+            self.counts = np.histogram(self.radius, bins=np.insert(self.Radii, 0, np.inf)[::-1])[0][::-1]
+
+        # optionally post-process voids by counting enclosed galaxies (and randoms)
+        if config_space_resizing:
             self.resize_voids(sign)
 
         self.position += self.box_shift
@@ -658,7 +696,8 @@ cdef class SphericalVoids:
 
         # create plot
         label = kwargs.pop('label', None)
-        color = kwargs.pop('color', 'red')
+        color = kwargs.pop('color', 
+                           'goldenrod' if data_positions is None else 'red')
         for (i, (c, r)) in enumerate(zip(centers, radii)):
             circ = Circle((c[axes[0]], c[axes[1]]), r, fill=False, edgecolor=color, 
                           label=None if i>0 else label, **kwargs)
@@ -667,9 +706,9 @@ cdef class SphericalVoids:
         ax.set_ylabel(axes_labels[1] + r' $[h^{-1}{\rm Mpc}]$', fontsize=15)
         ax.set_xlim(boxlims[axes[0]])
         ax.set_ylim(boxlims[axes[1]])
-        ax.set_title((rf'{slice_range[0]} $[h^{{-1}}{{\rm Mpc}}]$' 
-                    + rf'$\leq {slice_axis.upper()} \leq$' 
-                    + rf'{slice_range[1]} $[h^{{-1}}{{\rm Mpc}}]$'),
+        ax.set_title((rf'{slice_range[0]} $\leq$ ' 
+                    + rf'{slice_axis.upper()} $[h^{{-1}}{{\rm Mpc}}]$' 
+                    + rf' $\leq$ {slice_range[1]}'),
                     fontsize=15)
         ax.set_aspect('equal')
 

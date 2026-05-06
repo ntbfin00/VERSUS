@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def FFT3Dr(
     delta,
     direction='forward',
-    threads=8,
+    threads=1,
     use_wisdom=False,
     fft_plan=None,
     fft_in=None,
@@ -94,7 +94,8 @@ def FFT3Dr(
 
     # execute FFT
     logger.debug(
-        "Computing forwards FFT using {}".format(
+        "Computing {} FFT using {}".format(
+            direction,
             "MEASURE" if use_wisdom else "ESTIMATE"
         )
     )
@@ -112,7 +113,7 @@ def tophat_smoothing(
     delta,
     radius,
     cellsize,
-    threads=8,
+    threads=1,
     use_wisdom=False,
     fft_plan=None,
     ifft_plan=None,
@@ -153,11 +154,13 @@ def tophat_smoothing(
     cdef int i, j, k, xdim, ydim, zdim
     cdef np.float32_t[::1] kkx, kky, kkz
     cdef np.complex64_t[:,:,::1] delta_k
+    cdef int threads_c = threads
 
     xdim, ydim, zdim = delta.shape
 
     # compute FFT of field
     delta_k, fft_plan, fft_in, fft_out = FFT3Dr(delta, 
+                                                threads=threads,
                                                 use_wisdom=use_wisdom, 
                                                 fft_plan=fft_plan, 
                                                 fft_in=fft_in, 
@@ -170,7 +173,7 @@ def tophat_smoothing(
     kkz = np.fft.rfftfreq(zdim, cellsize[2]).astype('f4')**2
 
     prefact = 2.0 * np.pi * radius
-    for i in prange(xdim, nogil=True):
+    for i in prange(xdim, nogil=True, num_threads=threads_c):
         for j in range(ydim):
             for k in range(zdim//2 + 1):
 
@@ -186,6 +189,7 @@ def tophat_smoothing(
 
     delta_sm, ifft_plan, ifft_in, ifft_out = FFT3Dr(delta_k, 
                                                     direction='backward',
+                                                    threads=threads,
                                                     use_wisdom=use_wisdom, 
                                                     fft_plan=ifft_plan, 
                                                     fft_in=ifft_in, 

@@ -23,10 +23,11 @@ def parse_args():
     parser.add_argument('--mesh_args', required=False, nargs='+', help="Provide dictionary of cellsize, r_sep, boxsize, boxcenter and box-like.")
     parser.add_argument('--radii', default=[0.], nargs='+', help="List of void radii to detect. Can be passed as dictionary of arguments to np.linspace or np.arange, e.g. \"{'start': 20, 'stop': 50, 'num (or step)': 10}\"")
     parser.add_argument('--void_delta', type=float, default=-0.8, help="Maximum overdensity to be classified as void. If value is positive, peaks will be found instead.")
-    parser.add_argument('--void_overlap', default=False, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
-    parser.add_argument('--smoothing', type=float, default=0.45, help="Radius (as fraction of galaxy separation) to initally smooth density field.")
-    parser.add_argument('--no_resizing', required=False, action='store_true', help="No void radius resizing to match unsmoothed field.")
-    parser.add_argument('--save_fn', type=str, default=None, help="Path to save output (void positions & radii). Defaults to 'output/'.")
+    parser.add_argument('--void_overlap', default=True, help="Boolean or volume fraction of allowed void overlap. True allows overlap up to void centre while False prevents overlap.")
+    parser.add_argument('--void_merge', default=0.9, help="Boolean or maximum fraction of non-overlapping region to be considered for merging. True merges all overlapping voids while False prevents merging.")
+    parser.add_argument('--smoothing', type=float, default=4, help="Radius to initially smooth random field as fraction of average separation.")
+    parser.add_argument('--cs_resizing', required=False, action='store_true', help="Resize voids in configuration space directly using galaxy positions.")
+    parser.add_argument('--save_fn', type=str, default=None, help="Path to save void-finding output. Defaults to 'output/'.")
     parser.add_argument('--threads', type=int, default=8, 
                         help="Number of threads used for multi-threaded processes. if set to zero, defaults to number of available CPUs.")
     parser.add_argument('--dryrun', required=False, action='store_true',help="Run script without saving outputs")
@@ -60,11 +61,18 @@ def parse_args():
     else:
         args.void_overlap = float(args.void_overlap)
 
+    if args.void_merge in [True, 'True', 'true']:
+        args.void_merge = True
+    elif args.void_merge in [False, 'False', 'false']:
+        args.void_merge = False
+    else:
+        args.void_merge = float(args.void_merge)
+
     return args
 
 
 def filename(save_fn):
-    append = 'void_{}.npy'
+    append = '{}.npy'
     path = Path(save_fn + append)
     path.parent.mkdir(parents=True, exist_ok=True)
     if len(path.stem[:-7])>0:
@@ -85,25 +93,26 @@ def main():
         save_mesh = args.mesh
 
     # initialise void finder with command-line arguments
-    VF = SphericalVoids(data_positions=args.data, data_weights=args.data_weights, init_sm_frac=args.smoothing,
+    vf = SphericalVoids(data_positions=args.data, data_weights=args.data_weights, rand_sm_frac=args.smoothing,
                         random_positions=args.random, random_weights=args.random_weights, data_cols=args.columns,
                         delta_mesh=args.mesh, mesh_args=args.mesh_args, save_mesh=save_mesh,
                         cellsize=args.cellsize, reconstruct=args.reconstruct, recon_args=args.recon_args)
 
     # run void finding
-    VF.run_voidfinding(args.radii, void_delta=args.void_delta, void_overlap=args.void_overlap, 
-                       void_resizing=not args.no_resizing, threads=args.threads)
+    vf.run_voidfinding(args.radii, void_delta=args.void_delta, 
+                       void_overlap=args.void_overlap, void_merge=args.void_merge, 
+                       config_space_resizing=args.cs_resizing, threads=args.threads)
 
     # save void output to file
-    fn = "output/" if args.save_fn is None else args.save_fn
+    fn = "output/versus_" if args.save_fn is None else args.save_fn
     logger.info(f"Saving output to {fn}*")
     if not args.dryrun:
         fn = filename(fn)
-        np.save(fn.format("positions"), VF.position)
-        np.save(fn.format("radii"), VF.radius)
-        np.save(fn.format("vsf"), VF.size_function)
+        np.save(fn.format("voids"), np.c_[vf.id, vf.position, vf.radius])
+        np.save(fn.format("vsf"), vf.size_function)
+        np.save(fn.format("membership"), vf.cell_membership)
     else:
-        logger.info(f'Output: {dict(zip(VF.input_radii, VF.counts))}')
+        logger.info(f'Output: {dict(zip(vf.input_radii, vf.counts))}')
 
 
 if __name__ == "__main__":

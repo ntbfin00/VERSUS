@@ -7,10 +7,15 @@
 # Void Extraction in Real-space of Spherical UnderdensitieS
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
-<p align="center">
-  <img src="assets/flowchart.png?raw=true" alt="VERSUS algorithm"/>
-</p>
-
+<div style="text-align: center;">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/flowchart_b.png?raw=true">
+    <source media="(prefers-color-scheme: light)" srcset="assets/flowchart_w.png?raw=true">
+    <img src="assets/flowchart_w.png?raw=true"
+         alt="VERSUS logo"
+         style="width: 100%; max-width: 100%; height: auto;">
+  </picture>
+</div>
 
 ## Installation
 To pip install:
