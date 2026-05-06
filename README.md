@@ -59,11 +59,13 @@ If positive values for ```void_delta``` (default ```void_delta=-0.8```) in ```VF
 If you use this code in a scientific publication, please cite:
 
 ```
-@unpublished{Findlay2026prep,
-  author = "Findlay, Nathan and Nadathur, Seshadri",
-  title  = "Void-finding with VERSUS: Mitigating systematic bias in void sizes with discrete tracer
-samples",
-  note   = "(in prep.)",
-  year   = "2026"
+@ARTICLE{Findlay2026,
+         title={VERSUS: An excursion-set-inspired void-finder for the Stage-IV era}, 
+         author={Nathan Findlay and Seshadri Nadathur},
+         year={2026},
+         eprint={2605.03779},
+         archivePrefix={arXiv},
+         primaryClass={astro-ph.CO},
+         url={https://arxiv.org/abs/2605.03779}, 
 }
 ```
