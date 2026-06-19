@@ -9,7 +9,7 @@ def Abacus_VSF(r):
 
 def N_theory(r, volume=2000**3):
     # vsf computed for r = np.linspace(10, 55, 100) from CosmoBolognaLib.Cosmology.size_function
-    vsf = np.load("/home/ntbfin/VERSUS/scripts/vsf_theory_interpolated.npy", allow_pickle=True)[()]
+    vsf = np.load("vsf_theory_interpolated.npy", allow_pickle=True)[()]
     dN = volume * np.diff(r)[0] * vsf(r) / r 
     return dN
     
