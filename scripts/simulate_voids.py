@@ -13,14 +13,15 @@ parser.add_argument('-vf', '--voidfinder', required=True, type=str, help="Void-f
 parser.add_argument('--boxsize', type=float, default=2000)
 parser.add_argument('--R_extent', type=float, default=2.5, help="Factor of void radius to imprint void density profile")
 parser.add_argument('--save_dir', required=False, type=str, default='sims/', help="Directory to save simulations")
+parser.add_argument('--seed', required=False, type=int, default=42, help="Random seed")
+
 args = parser.parse_args()
 
 # initialise the random seeds
-random.seed(a=42)
-np.random.seed(42)
+random.seed(a=args.seed)
+np.random.seed(args.seed)
 
 # inputs
-# Rmin, Rmax = (30, 50)
 Rmin, Rmax = (35, 55)
 Ncand      = 5000 # number of candidate voids
 R_extent   = args.R_extent
@@ -30,17 +31,19 @@ boxsize = args.boxsize
 Ngal = int(args.rho_mean * args.boxsize**3)
 print(f'n={args.rho_mean:.4f} | N_gals={Ngal} | Ncand={Ncand} | Rmin={Rmin} | Rmax={Rmax} | Rextent={R_extent:.1f}')
 
+# sample void size distribution from theory
+radii = np.linspace(Rmin, Rmax, 100)
+N_radii = np.rint(N_theory(radii, volume=boxsize**3)).astype(np.int32)
+radii = radii[N_radii > 0]
+N_radii = N_radii[N_radii > 0]
+N_radii_tot = N_radii.sum()
+void_pos = np.zeros((N_radii_tot, 3))
+void_rad = np.zeros(N_radii_tot)
 
 # define the arrays with the positions and radii of the voids
 cand_pos = np.random.rand(Ncand, 3).astype(np.float32) * boxsize 
 gal_pos  = np.random.rand(Ngal, 3).astype(np.float32) * boxsize 
 tree = KDTree(gal_pos, boxsize=boxsize + 1e-3, compact_nodes=False, balanced_tree=False)
-
-# sample Abacus-like void size distribution
-# population = np.linspace(Rmin, Rmax, 1000)
-# weights    = Abacus_VSF(population)
-# radii      = np.array(random.choices(population, weights, k=Ncand))
-# radii      = -np.sort(-radii.astype(np.float32))
 
 # sample void size distribution from theory
 radii = np.linspace(Rmin, Rmax, 100)
