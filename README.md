@@ -60,12 +60,16 @@ If you use this code in a scientific publication, please cite:
 
 ```
 @ARTICLE{Findlay2026,
-         title={VERSUS: An excursion-set-inspired void-finder for the Stage-IV era}, 
-         author={Nathan Findlay and Seshadri Nadathur},
-         year={2026},
-         eprint={2605.03779},
-         archivePrefix={arXiv},
-         primaryClass={astro-ph.CO},
-         url={https://arxiv.org/abs/2605.03779}, 
+       author = {{Findlay}, Nathan and {Nadathur}, Seshadri},
+        title = "{VERSUS: an excursion-set-inspired void-finder for the Stage-IV era}",
+      journal = {\mnras},
+         year = 2026,
+        month = sep,
+       volume = {551},
+       number = {2},
+          eid = {stag1425},
+        pages = {stag1425},
+          doi = {10.1093/mnras/stag1425},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2026MNRAS.551g1425F},
 }
 ```
