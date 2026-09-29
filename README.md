@@ -5,6 +5,8 @@
 </picture>
 
 # Void Extraction in Real-space of Spherical UnderdensitieS
+[![Documentation Status](https://img.shields.io/readthedocs/VERSUS)](https://VERSUS.readthedocs.io)
+
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
 <div style="text-align: center;">
