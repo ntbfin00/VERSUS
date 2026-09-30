@@ -1,7 +1,7 @@
 Welcome to VERSUS documentation!
 ================================
 
-**VERSUS** (**V**\oid **E**\xtraction of **R**\eal-space **S**\pherical **U**\nderdensities) is your new favourite cosmic-void-finding tool. It's fast, scalable, and incredibly easy to use! 
+**VERSUS** (**V**\oid **E**\xtraction of **R**\eal-space **S**\pherical **U**\nderdensitie\ **S**\) is your new favourite cosmic-void-finding tool. It's fast, scalable, and incredibly easy to use! 
 
 VERSUS identifies low-density (or high-density) regions of the large-scale structure, making it ideally suited to galaxy environmental studies. Its novel sphere-merging algorithm accurately reproduces excursion-set models of the void size function while remaining fully optimised for simulation-based approaches.
 Jump straight into the :doc:`getting_started` guide to get hands-on!

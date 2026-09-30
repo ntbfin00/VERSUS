@@ -6,10 +6,7 @@ This section documents the primary modules and classes available in **VERSUS**.
 Logging Utilities
 -----------------
 
-.. automodule:: VERSUS.setup_logging
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autofunction:: VERSUS.setup_logging
 
 Spherical Voids
 ---------------

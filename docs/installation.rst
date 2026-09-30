@@ -9,4 +9,4 @@ You can install VERSUS from source or via pip:
 
 .. note::
 
-   The optional ``-e`` flag flag is used to install the package in editable mode, which allows you to make changes to the code and have them reflected without reinstalling the package.
+   The optional ``-e`` flag is used to install the package in editable mode, which allows you to make changes to the code and have them reflected without reinstalling the package.
