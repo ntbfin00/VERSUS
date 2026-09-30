@@ -7,6 +7,8 @@ build:
     python: "3.11"
   apt_packages:
     - libomp-dev
+    - libopenmpi-dev
+    - openmpi-bin
 
 python:
   install:
