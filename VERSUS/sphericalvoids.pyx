@@ -85,23 +85,17 @@ cdef class SphericalVoids:
     volume: float
         Volume of the simulation/survey.
 
-    r_sep: 
-        Average separation of data points, calculated as :math:`(4 \pi \bar{\rho} / 3)^{-\frac{1}{3}}`
+    r_sep: float
+        Average separation of data points, calculated as :math:`(4 \pi \bar{\rho} / 3)^{-\frac{1}{3}}`.
 
     delta: array (N,N,N)
         Density mesh, a 3D array holding overdensity values.
 
-    data_tree: scipy.spatial.cKDTree, default=None
+    data_tree: scipy.spatial.cKDTree
         KD-tree of data positions used for ``SphericalVoids.resize_voids()``.
         
-    random_tree: scipy.spatial.cKDTree, default=None
+    random_tree: scipy.spatial.cKDTree
         KD-tree of random positions used for ``SphericalVoids.resize_voids()``.
-
-    data_weights: array (N), default=None
-        Array of data weights. Defaults to uniform weighting.
-
-    random_weights: array (N), default=None
-        Array of random weights. Defaults to uniform weighting.
 
     input_radii: array
         List of initial void radii bins used. Set by ``SphericalVoids.run_voidfinding()``.
@@ -233,7 +227,7 @@ cdef class SphericalVoids:
 
     def rmin_spurious(self):
         r"""
-        Determine the detection limit for small spurious voids given the data number density using the empirical formula
+        Estimate the detection limit for small spurious voids given the data number density using the empirical formula
         :math:`(a \delta_v + b) / {\bar\rho}^{1/3}`, where a and b are constants determined from random particle simulations.
 
         Returns

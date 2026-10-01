@@ -18,8 +18,3 @@ If you use this code in a scientific publication, please cite:
    installation
    getting_started
    api
-
-Indices and tables
-==================
-* :ref:`genindex`
-* :ref:`modindex`
