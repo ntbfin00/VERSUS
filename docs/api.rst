@@ -13,6 +13,5 @@ Spherical Voids
 
 .. automodule:: VERSUS.sphericalvoids
    :members:
-   :undoc-members:
    :show-inheritance:
 
