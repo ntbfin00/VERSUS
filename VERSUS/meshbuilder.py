@@ -96,15 +96,15 @@ class DensityMesh:
 
     def _load_data(self, data_fn, data_cols, z_to_dist=None, **kwargs):
         r"""
-        Load galaxy or random positions from FITS file
+        Load galaxy or random positions from file.
 
         Parameters
         ----------
         data_fn: string
-            Path to data.
+            Path to numpy or FITS file.
 
         data_cols: list
-            Positions (cartesian 'xyz' or sky 'rdz') column headers to read. Fourth column (if included) should correspond to data weights.
+            Positions (cartesian xyz' or sky 'rdz') column headers to read. Fourth column (if included) should correspond to data weights.
 
         z_to_dist: callable
             Callable that provides distance as a function of redshift.

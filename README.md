@@ -5,6 +5,8 @@
 </picture>
 
 # Void Extraction in Real-space of Spherical UnderdensitieS
+[![Documentation Status](https://img.shields.io/readthedocs/ntbfin00-versus)](https://ntbfin00-versus.readthedocs.io/)
+
 Spherical underdensity void-finding with optional real-space reconstruction for use with both simulated and survey data. Adapted from the void-finding algorithm in the [Pylians3](https://github.com/franciscovillaescusa/Pylians3) library.
 
 <div style="text-align: center;">
@@ -16,6 +18,10 @@ Spherical underdensity void-finding with optional real-space reconstruction for 
          style="width: 100%; max-width: 100%; height: auto;">
   </picture>
 </div>
+
+## Documentation
+
+The documentation is hosted on Read the Docs: https://ntbfin00-versus.readthedocs.io/. Additionally, an example notebook can be found in ``basic_example.ipynb``.
 
 ## Installation
 To pip install:

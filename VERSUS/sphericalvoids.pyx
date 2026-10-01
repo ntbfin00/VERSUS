@@ -13,33 +13,34 @@ logger = logging.getLogger(__name__)
 
 cdef class SphericalVoids:
     r"""
-    Run spherical void-finding algorithm.
+    Spherical void-finding algorithm.
 
     Parameters
     ----------
-    data_positions: array (N,3), Path
+    data_positions: array (N,3), Path, default=None
         Array of data positions (in cartesian or sky coordinates) or path to such positions.
 
     data_weights: array (N), default=None
-        Array of data weights.
+        Array of data weights. Defaults to uniform weighting.
 
-    random_positions: array (N,3), Path
+    random_positions: array (N,3), Path, default=None
         Array of random positions (in cartesian or sky coordinates) or path to such positions.
 
     random_weights: array (N), default=None
-        Array of random weights.
+        Array of random weights. Defaults to uniform weighting.
 
     data_cols: list, default=None
-        List of data/random position column headers. Fourth element is taken as the weights (if present). Defaults to ['RA','DEC','Z'] if randoms are provided and ['X','Y','Z'] if not.
+        List of data/random position column headers. Fourth element is taken as the weights (if present). Defaults to ``['RA','DEC','Z']`` if randoms are provided and ``['X','Y','Z']`` if not.
 
     reconstruct: str, default=None
-        Type of density field reconstruction passed to DensityMesh.run_recon(). Defaults to no reconstruction.
+        Type of density field reconstruction passed to ``DensityMesh.run_recon()``. Defaults to no reconstruction.
 
     recon_args: dict, default=None
-        Reconstruction arguments ('f', 'bias', 'los', 'engine' and 'smoothing radius') passed to DensityMesh.run_recon().
+        Reconstruction arguments passed as dictionary to ``DensityMesh.run_recon()``, e.g. ``{'f': 0.8, 'bias': 2.1, 'los': 'z', 'engine': 'IterativeFFTParticleReconstruction', 'smoothing radius': 10}``.
 
-    delta_mesh: array, Path, default=None
-        If data_positions not provided, load density mesh directly from array or from path to pre-saved mesh FITS file. 
+    delta_mesh: array (N,N,N), Path, default=None
+        If data_positions not provided, load density mesh directly from 3D array or from path to pre-saved mesh FITS file. 
+        Mesh FITS file can be saved at runtime by setting ``save_mesh=True``.
 
     mesh_args: dict, default=None
         Dictionary to hold cellsize, boxsize, boxcenter and box_like attributes. Must be provided if delta_mesh provided as array, else read from file.
@@ -57,7 +58,66 @@ cdef class SphericalVoids:
         Whether to save and load wisdom during FFT computations. Advantageous for serial void-finding runs.
 
     kwargs : dict
-        Optional arguments for meshbuilder.DensityMesh object.
+        Optional arguments for ``DensityMesh`` object.
+
+    Attributes
+    ----------
+
+    vf_type: str
+        Type of extrema detected, determined by the value of ``void_delta`` in ``SphericalVoids.run_voidfinding()``.
+        If ``void_delta<0``, search for low-density regions (``vf_type='void'``); if ``void_delta>0``, search for high-density regions (``vf_type='peak'``).
+
+    box_like: bool
+        If ``True``, VERSUS is running in simulation box mode; if ``False`` VERSUS is in survey mode. Defaults to ``True`` if ``random_positions`` not provided.
+
+    boxsize: array (3)
+        Dimensions of the density mesh in the same units as ``data_positions``. 
+
+    boxcenter: array (3)
+        Centre location of the density mesh in the same units as ``data_positions``.
+
+    cellsize: float, default=4
+        Cellsize of the density mesh in the same units as ``data_positions``.
+
+    nmesh: array (3)
+        Number of density mesh cells along each dimension.
+
+    volume: float
+        Volume of the simulation/survey.
+
+    r_sep: float
+        Average separation of data points, calculated as :math:`(4 \pi \bar{\rho} / 3)^{-\frac{1}{3}}`.
+
+    delta: array (N,N,N)
+        Density mesh, a 3D array holding overdensity values.
+
+    data_tree: scipy.spatial.cKDTree
+        KD-tree of data positions used for ``SphericalVoids.resize_voids()``.
+        
+    random_tree: scipy.spatial.cKDTree
+        KD-tree of random positions used for ``SphericalVoids.resize_voids()``.
+
+    input_radii: array
+        List of initial void radii bins used. Set by ``SphericalVoids.run_voidfinding()``.
+
+    position: array
+        Array of void centre positions. Set by ``SphericalVoids.run_voidfinding()``.
+
+    radius: array
+        Array of void radii. Set by ``SphericalVoids.run_voidfinding()``.
+
+    counts: array
+        Array of void number counts in each ``input_radii`` bin. Set by ``SphericalVoids.run_voidfinding()``.
+
+    id: array
+        Array of ID numbers for each detected void. Voids that have been merged share the same ID as the parent void. Set by ``SphericalVoids.run_voidfinding()``.
+
+    cell_membership: array
+        3D array matching the density mesh dimensions, where each cell contains the integer ID of its assigned void (or 0 for unassigned/field cells). Set by ``SphericalVoids.run_voidfinding()``.
+
+    size_function: array (3,N)
+        Array of the computed void size function holding bin centres, values, and poisson errors. Set by ``SphericalVoids.run_voidfinding()``.
+
     """
 
     cdef public object delta, data_tree, random_tree, data_weights, random_weights
@@ -146,12 +206,14 @@ cdef class SphericalVoids:
 
     def load_mesh(self, mesh_fn):
         r"""
-        Load pre-populated 3D mesh from FITS file.
+        Load pre-populated 3D density mesh from FITS file. File can be generated by setting ``save_mesh=True`` when instantiating the class.
+        Primary HDU must contain the overdensity values; attributes ``r_sep``, ``boxsize``, ``boxcenter``, ``box_like``, 
+        ``volume``, ``data_positions``, ``random_positions``, ``data_weights``, and ``random_weights`` must be provided as additional HDUs.
 
         Parameters
         ----------
         mesh_fn: string
-            Path to mesh.
+            Path to mesh FITS file.
         """
 
         with fits.open(mesh_fn) as f:
@@ -163,19 +225,26 @@ cdef class SphericalVoids:
                 else:
                     setattr(self, name, f[name].data)
 
-    def rmin_spurious(self, sign):
+    def rmin_spurious(self):
         r"""
-        Determine the detection limit for spurious voids for the given tracer sample using an empirical formula. At smaller radii, spurious voids may contaminate the output void sample.
+        Estimate the detection limit for small spurious voids given the data number density using the empirical formula
+        :math:`(a \delta_v + b) / {\bar\rho}^{1/3}`, where a and b are constants determined from random particle simulations.
+
+        Returns
+        -------
+
+        rmin: float
+           Minimum radius of non-spurious detections. At smaller radii, spurious voids may contaminate the output void sample.
 
         """
 
-        if sign == 1:
+        if self.vf_type == 'void':
             fact = 2.2
         else:
-            fact = 1.6
+            fact = -1.6
 
         rho_mean = 3 / (4 * np.pi * self.r_sep**3)
-        return (fact * sign * self.void_delta + 3.6) / rho_mean**(1/3)
+        return (fact * self.void_delta + 3.6) / rho_mean**(1/3)
 
     def _smoothing(self, float radius):
         r"""
@@ -214,9 +283,12 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def resize_voids(self, float sign):
+    def resize_voids(self):
         """
-        Resize voids found on smoothed field with FFTs according to interior densities calculated directly from the galaxy and random positions.
+        Resize voids found on the FFT smoothed field according to interior densities calculated directly from the data and random positions. 
+        Used for debugging and validating the default FFT smoothing result.
+
+            
         """
         cdef int p, q, N_tot
         cdef float fact, delta_enc
@@ -229,8 +301,13 @@ cdef class SphericalVoids:
         self.random_tree = None if self.box_like else cKDTree((self.random_tree - self.box_shift) % self.boxsize, 
                                                               compact_nodes=False, balanced_tree=False)
 
-        # ensure correct expression for clusters
+        # ensure correct expression for peaks
+        if self.vf_type == 'void':
+            sign = 1
+        else:
+            sign = -1
         void_delta = sign * self.void_delta
+        
 
         # counts in smallest bin are underestimated due to missed upscattering from smaller radii
         self.input_radii = self.input_radii[:self.input_radii.size-1]
@@ -290,7 +367,8 @@ cdef class SphericalVoids:
     @cython.wraparound(False)
     def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=16):
         r"""
-        Run spherical voidfinding on density mesh.
+        Calculate void catalogue from from density mesh. 
+        Sets class attributes ``input_radii``, ``position``, ``radius``, ``counts``, ``id``, ``cell_membership``, and ``size_function``.
 
         Parameters
         ----------
@@ -301,19 +379,19 @@ cdef class SphericalVoids:
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
 
-        void_overlap: float, default=True
-            Maximum allowed volume fraction of void overlap. If False, no overlap is allowed.
+        void_overlap: float, bool, default=True
+            Maximum allowed volume fraction of void overlap. If ``False``, no overlap is allowed.
 
-        void_merge: float, default=0.9
-            Merge threshold for overlapping void. If overlapping region exceeds (1 - void_merge), void is merged.
-            If void_merge=True, always merge overlapping voids; if void_merge=False, never merge overlaps.
+        void_merge: float, bool, default=0.9
+            Merge threshold for overlapping void. If overlapping volume exceeds ``(1 - void_merge) * void_volume``, void is merged.
+            If ``True``, always merge overlapping voids; if ``False``, never merge overlaps.
 
         config_space_resizing: bool, default=False
-            Resize the voids using their positions. Useful for checking FFT smoothing result.
+            Resize the voids by directly calculating the interior density from the data positions. Useful for validating the default FFT smoothing result.
 
-        threads: int, default=8
+        threads: int, default=16
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
-
+            
         """
         cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
         cdef float R, R_grid, R_grid2, Rmin, Rspurious
@@ -351,7 +429,7 @@ cdef class SphericalVoids:
             sign = 1.
             self.vf_type, ineq = ('void', '<')
 
-        Rspurious = self.rmin_spurious(sign)
+        Rspurious = self.rmin_spurious()
         # set default radii if not provided
         if radii[0] == 0.:
             Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
@@ -552,7 +630,7 @@ cdef class SphericalVoids:
 
         # optionally post-process voids by counting enclosed galaxies (and randoms)
         if config_space_resizing:
-            self.resize_voids(sign)
+            self.resize_voids()
 
         self.position += self.box_shift
 
@@ -599,7 +677,7 @@ cdef class SphericalVoids:
             Path to save figure.
 
         kwargs:
-            Optional arguments for matplotlib.pyplot.errorbar().
+            Optional arguments for ``matplotlib.pyplot.errorbar()``.
         """
         import matplotlib.pyplot as plt
 
@@ -632,7 +710,7 @@ cdef class SphericalVoids:
     def plot_slice(self, slice_axis='Z', slice_range=(30,80), data_positions=None, 
                    legend=False, grid=False, ax=None, save_fn=None, **kwargs):
         r"""
-        Plot the void size function.
+        Plot a 2D slice through the density mesh with voids/peaks marked.
 
         Parameters
         ----------
@@ -653,13 +731,13 @@ cdef class SphericalVoids:
             Plot grid.
 
         ax: matplotlib.axes, default=None
-            Optional axes for figure. If not None, only the voids/peaks are plotted (no galaxies/delta mesh).
+            Optional axes for figure. If not None, only the voids/peaks are plotted (no galaxies/density mesh).
 
         save_fn: str, default=None
             Path to save figure.
 
         kwargs:
-            Optional arguments for matplotlib.patches.Circle().
+            Optional arguments for ``matplotlib.patches.Circle()``.
         """
         import matplotlib.pyplot as plt
         from matplotlib.patches import Circle
