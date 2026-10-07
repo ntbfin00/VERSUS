@@ -48,7 +48,8 @@ def test_peak_finding(initialise_vf):
     vf.run_voidfinding(void_delta=2.1)
     assert vf.vf_type == 'peak'
 
-def test_output_dimensions(initialise_vf): 
+@pytest.mark.parametrize("radii", [None, [40], [40, 30, 20], [30, 20, 40]])
+def test_output_dimensions(initialise_vf, radii): 
     vf = initialise_vf
     vf.run_voidfinding()
     assert len(vf.position) > 0
