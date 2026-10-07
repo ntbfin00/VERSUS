@@ -374,7 +374,7 @@ cdef class SphericalVoids:
         ----------
 
         radii: list 
-            List of void radii to search for. Defaults to 4-104x cellsize.
+            List of void radii to search for. Defaults to the range 20-62 in steps of 2 (assuming data is in :math:`\mathrm{Mpc} / h`).
 
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
