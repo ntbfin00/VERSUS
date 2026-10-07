@@ -365,7 +365,7 @@ cdef class SphericalVoids:
     @cython.boundscheck(False)
     @cython.cdivision(True)
     @cython.wraparound(False)
-    def run_voidfinding(self, radii=[0.], float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=16):
+    def run_voidfinding(self, radii=None, float void_delta=-0.8, void_overlap=True, void_merge=0.9, config_space_resizing=False, int threads=16):
         r"""
         Calculate void catalogue from from density mesh. 
         Sets class attributes ``input_radii``, ``position``, ``radius``, ``counts``, ``id``, ``cell_membership``, and ``size_function``.
@@ -373,8 +373,8 @@ cdef class SphericalVoids:
         Parameters
         ----------
 
-        radii: list 
-            List of void radii to search for. Defaults to 4-104x cellsize.
+        radii: list, default=None
+            List of void radii to search for. If None, defaults to the range 20-62 in steps of 2 (assuming data is in :math:`\mathrm{Mpc} / h`) truncated at the estimated radius at which spurious voids enter the sample using ``SphericalVoids.rmin_spurious()``.
 
         void_delta: float, default=-0.8
             Maximum overdensity threshold to be classified as void. If value is positive, peaks will be found instead.
@@ -393,7 +393,7 @@ cdef class SphericalVoids:
             Number of threads used for multi-threaded processes. If set to zero, defaults to number of available CPUs.
             
         """
-        cdef np.ndarray[np.float32_t, ndim=1] Radii=np.array(radii, dtype=np.float32)
+        cdef np.ndarray[np.float32_t, ndim=1] Radii
         cdef float R, R_grid, R_grid2, Rmin, Rspurious
         cdef int bins, Ncells, nearby_voids, threads2 
         cdef long nmesh_tot=np.prod(self.nmesh)
@@ -431,11 +431,12 @@ cdef class SphericalVoids:
 
         Rspurious = self.rmin_spurious()
         # set default radii if not provided
-        if radii[0] == 0.:
+        if radii is None:
             Radii = np.arange(20, 62, 2, dtype=np.float32)[::-1]
             self.Radii = Radii[(Radii > cellsize) & (Radii > Rspurious)]  # ensure radii larger than cellsize and detection limit of spurious voids
             logger.debug(f'Radii set by default: cellsize={cellsize:.2f}, Rmin_spurious={Rspurious:.2f}.')
         else:
+            Radii = np.array(radii, dtype=np.float32)
             # ensure extra bin for void resizing
             if config_space_resizing:
                 Radii = np.append(Radii, Radii.min() - 2).astype(np.float32)
@@ -682,7 +683,7 @@ cdef class SphericalVoids:
         import matplotlib.pyplot as plt
 
         if self.input_radii is None:
-            raise Exception("Must run SphericalVoids.run_voidfinder() first in order to use this function.")
+            raise Exception("Must run SphericalVoids.run_voidfinding() first in order to use this function.")
 
         if ax is None: fig, ax = plt.subplots(1)
 
@@ -743,7 +744,7 @@ cdef class SphericalVoids:
         from matplotlib.patches import Circle
 
         if self.input_radii is None:
-            raise Exception("Must run SphericalVoids.run_voidfinder() first in order to use this function.")
+            raise Exception("Must run SphericalVoids.run_voidfinding() first in order to use this function.")
 
         axes_labels = ['X','Y','Z']
         axis = axes_labels.index(slice_axis.upper())

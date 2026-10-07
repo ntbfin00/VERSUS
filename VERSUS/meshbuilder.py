@@ -76,6 +76,7 @@ class DensityMesh:
             self.data_positions, self.data_weights = self._load_data(data_positions, data_cols)
         # load positions from array
         else:
+            self._check_data_shape(data_positions)
             self.data_positions = data_positions
             self.data_weights = data_weights
         # automatically determine boxsize from positions
@@ -89,10 +90,28 @@ class DensityMesh:
         if type(random_positions) is str:
             self.random_positions, self.random_weights = self._load_data(random_positions, data_cols)
         else:
+            if random_positions is not None: self._check_data_shape(random_positions)
             self.random_positions = random_positions
             self.random_weights = random_weights
         self.N_random = None if random_positions is None else len(self.random_positions)  # total randoms
         self.W_random = self.N_random if random_weights is None else np.array(random_weights).sum()  # sum of random weights
+
+    def _check_data_shape(self, data, has_weights=False):
+        data = np.asarray(data)
+
+        if has_weights:
+            N = [3,4]
+            append = " (or (N,4) if weights provided)"
+        else:
+            N = [3]
+            append = ""
+
+        if data.ndim != 2 or data.shape[1] not in N:
+            raise ValueError(
+                f"Expected positions with shape (N, 3)"
+                + append +
+                f", got {data.shape}"
+            )
 
     def _load_data(self, data_fn, data_cols, z_to_dist=None, **kwargs):
         r"""
@@ -113,6 +132,12 @@ class DensityMesh:
             Additional arguments for pyrecon.sky_to_cartesian
         """
 
+        if len(data_cols) < 3 or len(data_cols) > 4:
+            raise ValueError(
+                f"Expected a list of data column headers with length 3 (or 4 if weights are provided), "
+                f"got {len(data_cols)}"
+            )
+
         weights = None
 
         if data_fn.endswith('.fits'):
@@ -130,6 +155,7 @@ class DensityMesh:
         elif data_fn.endswith('.npy'):
             logger.info(f'Loading positions from npy file.')
             positions = np.load(data_fn)
+            self._check_data_shape(positions, has_weights=True)
             # read weights if 4th column provided
             if positions.shape[1]>3: 
                 weights = positions[:,3]
